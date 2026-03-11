@@ -7,4 +7,4 @@ set src-files=.\src\main.cpp
 set lflags=-NOLOGO -DEBUG -LIBPATH:.\libs\
 SET libs="kernel32.lib" "user32.lib" "gdi32.lib" "d3d12.lib" "dxguid.lib" "dxgi.lib" "d3dcompiler.lib"
 
-cl %cflags% %includes% %defines% %src-files% -link %lflags% %libs% -OUT:rtbench.exe
+cl %cflags% %includes% %defines% %src-files% -link %lflags% %libs% -SUBSYSTEM:WINDOWS -OUT:rtbench.exe
