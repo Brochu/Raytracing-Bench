@@ -4,11 +4,16 @@
 #include <windows.h>
 #include <d3dcompiler.h>
 
+#include "renderer.hpp"
+
 LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lparam) {
     switch (msg) {
 
     case WM_CREATE:
-        // Any window creation logic
+        {
+            CREATESTRUCT *cs = reinterpret_cast<CREATESTRUCT*>(lparam);
+            SetWindowLongPtr(hWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+        }
         return 0;
 
     case WM_DESTROY:
@@ -18,7 +23,10 @@ LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lpara
 
     case WM_PAINT:
         {
-            // DRAW CALL STARTING POINT
+            renderer *r = reinterpret_cast<renderer*>(GetWindowLongPtr(hWindow, GWLP_USERDATA));
+            if (r) {
+                render_draw(r);
+            }
         }
         return 0;
     }
@@ -32,26 +40,32 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     freopen_s(&fp, "CONOUT$", "w", stderr);
     freopen_s(&fp, "CONIN$", "r", stdin);;
 
+    constexpr uint32_t win_width = 800;
+    constexpr uint32_t win_height = 600;
+
+    HICON icon = LoadIcon(hInstance, "g_icon");
+
     WNDCLASSEX wclass = { 0 };
     wclass.cbSize = sizeof(WNDCLASSEX);
     wclass.style = CS_HREDRAW | CS_VREDRAW;
     wclass.lpfnWndProc = window_proc;
     wclass.hInstance = hInstance;
     wclass.lpszClassName = "rtbench-win";
+    wclass.hIcon = icon;
+    wclass.hIconSm = icon;
 
     if (!RegisterClassEx(&wclass)) {
         printf("[ERR] Failed to register window class.");
         return -1;
     }
 
-    static uint32_t win_width = 800;
-    static uint32_t win_height = 600;
+    renderer render;
 
     HWND window = CreateWindowEx(0,
         "rtbench-win", "RT Bench - ALPHA",
         WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT, win_width, win_height,
-        NULL, NULL, hInstance, NULL
+        NULL, NULL, hInstance, &render
     );
 
     if (!window) {
@@ -59,8 +73,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
         return -1;
     }
 
-    // INIT ---------------------------
-    // --------------------------------
+    render_init(&render, window, win_width, win_height, {});
 
     for (bool should_quit = false; !should_quit; ) {
         MSG m;
@@ -75,6 +88,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     }
 
     // CLOSE ---------------------------
+    render_stop(&render);
     // ---------------------------------
 
     FreeConsole();
