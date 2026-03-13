@@ -48,6 +48,9 @@ struct renderer {
     uint32_t current_pass_id = 0;
 };
 
+struct render_scene {
+};
+
 void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::initializer_list<render_pass*>);
-void render_draw(renderer *r);
+void render_draw(renderer *r, render_scene *scene);
 void render_stop(renderer *r);

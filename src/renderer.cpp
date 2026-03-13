@@ -154,7 +154,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     printf("[OK] Renderer initialized (%ux%u, %u back buffers, %u passes)\n", width, height, FRAME_COUNT, r->num_passes);
 }
 
-void render_draw(renderer *r) {
+void render_draw(renderer *r, render_scene *scene) {
     frame_resources *frame = &r->frame_res[r->frame_index];
 
     frame->cmd_alloc->Reset();
