@@ -171,6 +171,72 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
         frame->fence_value = 0;
     }
 
+    // Acceleration structure buffers (per frame)
+    D3D12_RAYTRACING_GEOMETRY_DESC geo_desc = {};
+    geo_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+    geo_desc.AABBs.AABBCount = 128;
+    geo_desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+    geo_desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
+    blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+    blas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    blas_inputs.NumDescs = 1;
+    blas_inputs.pGeometryDescs = &geo_desc;
+    blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
+    r->device->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlas_inputs = {};
+    tlas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    tlas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    tlas_inputs.NumDescs = 1;
+    tlas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlas_info = {};
+    r->device->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_info);
+
+    UINT64 scratch_size = blas_info.ScratchDataSizeInBytes > tlas_info.ScratchDataSizeInBytes
+        ? blas_info.ScratchDataSizeInBytes : tlas_info.ScratchDataSizeInBytes;
+
+    D3D12_HEAP_PROPERTIES default_heap = {};
+    default_heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    for (int32_t i = 0; i < FRAME_COUNT; i++) {
+        frame_resources *frame = &r->frame_res[i];
+
+        D3D12_RESOURCE_DESC buf_desc = {};
+        buf_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        buf_desc.Width = blas_info.ResultDataMaxSizeInBytes;
+        buf_desc.Height = 1;
+        buf_desc.DepthOrArraySize = 1;
+        buf_desc.MipLevels = 1;
+        buf_desc.SampleDesc.Count = 1;
+        buf_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        buf_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        hr = r->device->CreateCommittedResource(
+            &default_heap, D3D12_HEAP_FLAG_NONE,
+            &buf_desc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+            nullptr, IID_PPV_ARGS(&frame->rt_blas));
+        CHECKHR(hr, "CreateCommittedResource (rt_blas)");
+
+        buf_desc.Width = tlas_info.ResultDataMaxSizeInBytes;
+        hr = r->device->CreateCommittedResource(
+            &default_heap, D3D12_HEAP_FLAG_NONE,
+            &buf_desc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+            nullptr, IID_PPV_ARGS(&frame->rt_tlas));
+        CHECKHR(hr, "CreateCommittedResource (rt_tlas)");
+
+        buf_desc.Width = scratch_size;
+        hr = r->device->CreateCommittedResource(
+            &default_heap, D3D12_HEAP_FLAG_NONE,
+            &buf_desc, D3D12_RESOURCE_STATE_COMMON,
+            nullptr, IID_PPV_ARGS(&frame->rt_scratch));
+        CHECKHR(hr, "CreateCommittedResource (rt_scratch)");
+    }
+
     // Command list
     hr = r->device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, r->frame_res[0].cmd_alloc, nullptr, IID_PPV_ARGS(&r->cmd_list));
     CHECKHR(hr, "CreateCommandList");
