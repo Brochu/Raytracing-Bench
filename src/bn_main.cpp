@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3dcompiler.h>
 
-#include "renderer.hpp"
+#include "bn_renderer.hpp"
 
 render_scene g_scene;
 

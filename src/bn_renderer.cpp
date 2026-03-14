@@ -1,4 +1,5 @@
-#include "renderer.hpp"
+#include "bn_renderer.hpp"
+#include "bn_shaders.hpp"
 
 #include <cassert>
 #include <cstdio>
@@ -176,6 +177,26 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     }
     hr = r->device->CreateRootSignature(0, sig_blob->GetBufferPointer(), sig_blob->GetBufferSize(), IID_PPV_ARGS(&r->root_sig));
 
+    // Pipeline state object
+
+    D3D12_STATE_SUBOBJECT sub_objects[2];
+    D3D12_GLOBAL_ROOT_SIGNATURE global_rs;
+    global_rs.pGlobalRootSignature = r->root_sig;
+    sub_objects[0].Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
+    sub_objects[0].pDesc = &global_rs;
+
+    D3D12_RAYTRACING_PIPELINE_CONFIG1 rt_config = {};
+    rt_config.MaxTraceRecursionDepth = 5;
+    rt_config.Flags = D3D12_RAYTRACING_PIPELINE_FLAG_NONE;
+    sub_objects[1].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG1;
+    sub_objects[1].pDesc = &rt_config;
+
+    D3D12_STATE_OBJECT_DESC state_desc = {};
+    state_desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+    state_desc.NumSubobjects = 2;
+    state_desc.pSubobjects = sub_objects;
+    hr = r->device->CreateStateObject(&state_desc, IID_PPV_ARGS(&r->rt_state));
+
     // Register render passes
     assert(pass_list.size() <= PASS_MAX_COUNT);
     for (render_pass *pass : pass_list) {
@@ -213,6 +234,7 @@ void render_draw(renderer *r, render_scene *scene) {
     r->cmd_list->ClearRenderTargetView(rtv, clear_color, 0, nullptr);
 
     r->cmd_list->SetGraphicsRootSignature(r->root_sig);
+    r->cmd_list->SetPipelineState1(r->rt_state);
 
     // Transition back buffer: render target -> present
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -237,6 +259,8 @@ void render_stop(renderer *r) {
         r->passes[i].stop(&r->passes[i], r);
     }
 
+    shaders_release();
+
     if (r->fence_event) CloseHandle(r->fence_event);
     if (r->fence) r->fence->Release();
     if (r->cmd_list) r->cmd_list->Release();
@@ -250,7 +274,7 @@ void render_stop(renderer *r) {
         if (r->frame_res[i].rt_scratch) r->frame_res[i].rt_scratch->Release();
         if (r->frame_res[i].rt_out) r->frame_res[i].rt_out->Release();
     }
-    if (r->rt_pso) r->rt_pso->Release();
+    if (r->rt_state) r->rt_state->Release();
     if (r->root_sig) r->root_sig->Release();
     if (r->main_heap) r->main_heap->Release();
     if (r->rtv_heap) r->rtv_heap->Release();

@@ -9,7 +9,7 @@ set defines=-D"BUILD_WINDOWS=1" -D"BUILD_DEBUG=1"
 set src-files=.\src\~unity.cpp
 
 set lflags=-NOLOGO -DEBUG -LIBPATH:.\libs\
-SET libs="kernel32.lib" "user32.lib" "gdi32.lib" "d3d12.lib" "dxguid.lib" "dxgi.lib" "d3dcompiler.lib"
+SET libs="kernel32.lib" "user32.lib" "gdi32.lib" "d3d12.lib" "dxguid.lib" "dxgi.lib" "d3dcompiler.lib" "dxcompiler.lib"
 
 rc %rflags% %res-files%
 cl %cflags% %includes% %defines% %src-files% -link %lflags% .\objects\resources.res %libs% -SUBSYSTEM:WINDOWS -OUT:rtbench.exe
