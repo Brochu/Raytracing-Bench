@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./build.bat:*)"
+      "Bash(./build.bat:*)",
+      "Bash(tree:*)",
+      "Bash(ls:*)"
     ]
   }
 }
