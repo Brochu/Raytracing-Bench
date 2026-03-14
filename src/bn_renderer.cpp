@@ -117,22 +117,6 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
 
     r->rtv_descriptor_size = r->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-    // Back buffer RTVs + per-frame resources
-    D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle = r->rtv_heap->GetCPUDescriptorHandleForHeapStart();
-    for (int32_t i = 0; i < FRAME_COUNT; i++) {
-        frame_resources *frame = &r->frame_res[i];
-
-        hr = r->swapchain->GetBuffer(i, IID_PPV_ARGS(&frame->back_buffer));
-        CHECKHR(hr, "GetBuffer");
-        r->device->CreateRenderTargetView(frame->back_buffer, nullptr, rtv_handle);
-        rtv_handle.ptr += r->rtv_descriptor_size;
-
-        hr = r->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame->cmd_alloc));
-        CHECKHR(hr, "CreateCommandAllocator");
-
-        frame->fence_value = 0;
-    }
-
     // Main bindless heap
     D3D12_DESCRIPTOR_HEAP_DESC main_heap_desc = {};
     main_heap_desc.NumDescriptors = RESOURCE_VIEWS_MAX_COUNT;
@@ -143,6 +127,49 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     CHECKHR(hr, "CreateDescriptorHeap (MAIN - Bindless)");
 
     r->main_descriptor_size = r->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    // Back buffer RTVs + per-frame resources
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle = r->rtv_heap->GetCPUDescriptorHandleForHeapStart();
+    for (int32_t i = 0; i < FRAME_COUNT; i++) {
+        frame_resources *frame = &r->frame_res[i];
+
+        hr = r->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame->cmd_alloc));
+        CHECKHR(hr, "CreateCommandAllocator");
+
+        // DXR output UAV (one per frame in flight)
+        D3D12_HEAP_PROPERTIES rt_out_heap_props = {};
+        rt_out_heap_props.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+        D3D12_RESOURCE_DESC rt_out_desc = {};
+        rt_out_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        rt_out_desc.Width = width;
+        rt_out_desc.Height = height;
+        rt_out_desc.DepthOrArraySize = 1;
+        rt_out_desc.MipLevels = 1;
+        rt_out_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        rt_out_desc.SampleDesc.Count = 1;
+        rt_out_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        hr = r->device->CreateCommittedResource(
+            &rt_out_heap_props, D3D12_HEAP_FLAG_NONE,
+            &rt_out_desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            nullptr, IID_PPV_ARGS(&frame->rt_out));
+        CHECKHR(hr, "CreateCommittedResource (rt_out)");
+
+        // UAV descriptor in main bindless heap (frame 0 = index 0, frame 1 = index 1)
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        D3D12_CPU_DESCRIPTOR_HANDLE uav_handle = r->main_heap->GetCPUDescriptorHandleForHeapStart();
+        uav_handle.ptr += i * r->main_descriptor_size;
+        r->device->CreateUnorderedAccessView(frame->rt_out, nullptr, &uav_desc, uav_handle);
+
+        hr = r->swapchain->GetBuffer(i, IID_PPV_ARGS(&frame->back_buffer));
+        CHECKHR(hr, "GetBuffer");
+        r->device->CreateRenderTargetView(frame->back_buffer, nullptr, rtv_handle);
+        rtv_handle.ptr += r->rtv_descriptor_size;
+
+        frame->fence_value = 0;
+    }
 
     // Command list
     hr = r->device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, r->frame_res[0].cmd_alloc, nullptr, IID_PPV_ARGS(&r->cmd_list));
@@ -176,9 +203,9 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
         assert(false);
     }
     hr = r->device->CreateRootSignature(0, sig_blob->GetBufferPointer(), sig_blob->GetBufferSize(), IID_PPV_ARGS(&r->root_sig));
+    CHECKHR(hr, "CreateRootSignature");
 
     // Pipeline state object
-
     D3D12_STATE_SUBOBJECT sub_objects[2];
     D3D12_GLOBAL_ROOT_SIGNATURE global_rs;
     global_rs.pGlobalRootSignature = r->root_sig;
@@ -196,6 +223,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     state_desc.NumSubobjects = 2;
     state_desc.pSubobjects = sub_objects;
     hr = r->device->CreateStateObject(&state_desc, IID_PPV_ARGS(&r->rt_state));
+    CHECKHR(hr, "CreateStateObject");
 
     // Register render passes
     assert(pass_list.size() <= PASS_MAX_COUNT);
