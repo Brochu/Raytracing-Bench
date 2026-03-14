@@ -1,0 +1,235 @@
+╭─── Claude Code v2.1.75 ──────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back Yeshu!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ Recent activity         │
+│                        ▘▘ ▝▝                       │ No recent activity      │
+│ Sonnet 4.6 · Claude Pro · alexbrochu1@gmail.com's  │                         │
+│ Organization                                       │                         │
+│            ~\Documents\Raytracing-Bench            │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+❯ in the current project, should I keep the render_scene like it is, let the    
+main program modify the camera params based on user input and then send this    
+scene so it is converted to the constant buffer that will be uploaded on the    
+GPU each frame? I assume I can then keep this small constant buffer in an       
+upload heap so it can be uploaded and used by the GPU at the same time easily   
+(I this the rebar should make it performant anyway?)                            
+                                                                                
+Or should I split this into static info for the sphere and only store the MVP   
+matrix that is the result of the camera's information? Read the @README.md if   
+you need to know what the project is about                                      
+  ⎿  Read README.md (3 lines)
+
+● Let me look at the current code to understand the scene/renderer setup.
+
+● Read 2 files (ctrl+o to expand)
+
+● Good question. A few observations from the code and the project's purpose:
+
+  Keep it as-is (single render_scene uploaded each frame). Here's why:
+
+  1. It's tiny. Your scene is ~4.6KB (128 spheres + colors + types + camera).
+  Uploading that every frame via an upload heap is essentially free. ReBAR or
+  not, this size is well within what you can just map-write-use with zero
+  concern.
+  2. Raytracing doesn't use MVP. You're building a raytracer, not a rasterizer.
+  The shader needs camera position + target to construct rays — not a
+  view-projection matrix. Splitting into "MVP + sphere data" doesn't map well to
+   how RT shaders consume the data. You'd want camera origin, camera basis 
+  vectors (or position+target and derive in shader), and the sphere list.
+  3. Splitting adds complexity for no gain. Two constant buffers, two root
+  parameters, two upload strategies — all to avoid re-uploading ~4KB that the
+  GPU can consume in a single cache line burst. At 128 spheres this is a
+  non-problem.
+  4. Project goal is denoising experimentation. You want to iterate fast on
+  render passes, not optimize constant buffer upload paths. Keep the data path
+  simple so you can focus on the interesting part.
+
+  Practical recommendation:
+
+  - Keep render_scene as your single constant buffer
+  - Put it in an upload heap (D3D12_HEAP_TYPE_UPLOAD), double-buffered (one per
+  frame-in-flight) so you can write frame N+1 while GPU reads frame N
+  - Map it persistently (Map(0, nullptr, &ptr) once, never unmap), memcpy each
+  frame
+  - Main loop updates g_scene.camera from input, calls render_draw, done
+
+  The only time splitting would matter is if you scale to thousands of objects
+  where the static data becomes large enough that re-uploading it is wasteful.
+  At that point you'd move geometry into a default heap and only upload the
+  dynamic camera data. But with 128 spheres that threshold is nowhere close.
+
+❯ If I want to use DXR to rat trace against signed distance fields instead of   
+triangles, do I still need to generate BLASes and TLAS accelerations structures 
+
+● Yes, DXR requires acceleration structures — there's no way around it. The
+  dispatch rays pipeline is hardwired to traverse a TLAS→BLAS hierarchy.
+
+  But you don't need real geometry. The standard approach for SDF raytracing
+  with DXR:
+
+  1. Create AABBs as proxy geometry. For each SDF primitive (your spheres),
+  define an D3D12_RAYTRACING_AABB bounding box that encloses it. For a sphere at
+   (x,y,z) with radius r, that's just [x-r, y-r, z-r] → [x+r, y+r, z+r].
+  2. Build BLAS with D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS
+  instead of triangles. You upload your AABB buffer and point the geometry desc
+  at it.
+  3. Build TLAS referencing that BLAS as usual (single bottom-level instance is
+  fine for your case).
+  4. Implement an intersection shader — this is where your actual SDF ray
+  marching happens. When a ray hits an AABB, DXR invokes your intersection
+  shader, and you sphere-trace (or solve analytically for simple spheres) to
+  report the hit via ReportHit().
+  5. Closest-hit shader runs as normal once a hit is confirmed.
+
+  So the pipeline looks like:
+
+  Ray → TLAS traversal → BLAS AABB hit → Your intersection shader (SDF eval) →
+  Closest hit shader
+
+  The AABB bounds let the hardware cull rays efficiently before your
+  intersection shader ever runs, which is the whole point — you get
+  HW-accelerated broad phase for free, and your SDF math only runs for rays that
+   actually reach the bounding volume.
+
+  For your 128 spheres, one BLAS with 128 AABBs and one TLAS instance is all you
+   need. Rebuild the BLAS only if spheres move; rebuild TLAS only if the
+  instance transform changes (which for a single identity-transform instance, it
+   won't).
+
+❯ wait, one blas with all the spheres in it? doesn't this defeat the purpose of 
+ the acceleration structure unless I misunderstand? I through it would be       
+better to have one blas that describes one sphere and then use instancing with  
+different transforms for all the spheres?                                       
+
+● You're right to question it, but the single BLAS isn't flat — the BLAS 
+  internally builds a BVH over its primitives. So 128 AABBs in one BLAS still
+  gives you a spatial hierarchy; rays don't test all 128.
+
+  That said, your instancing idea is also valid. The tradeoffs:
+
+  One BLAS, 128 AABBs (simpler for your case):
+  - BLAS builds its own internal acceleration tree — rays are still culled
+  efficiently
+  - Each AABB can have a different size, matching your varying radii directly
+  - Simpler setup: 1 BLAS build, 1 TLAS instance
+  - In the intersection shader, you get PrimitiveIndex() to know which sphere
+  was hit
+
+  One BLAS (unit sphere AABB), 128 TLAS instances:
+  - Makes sense when geometry is identical and only transforms differ
+  - But your spheres have different radii, so you'd need non-uniform scale in
+  the instance transform, then undo that in the intersection shader to get
+  correct SDF evaluation
+  - 128 TLAS instances instead of 1 — trivial cost, but more bookkeeping for no
+  benefit here
+
+  Instancing shines when you have expensive/complex geometry reused many times
+  (e.g., a detailed mesh placed 1000 times). For procedural AABBs where each
+  primitive is just 6 floats, there's nothing to "save" by sharing a single AABB
+   and transforming it.
+
+  TL;DR: One BLAS with 128 AABBs. The BVH inside the BLAS handles spatial
+  acceleration. Use PrimitiveIndex() in your intersection shader to index into
+  your sphere/color constant buffer.
+
+❯ Ok I see, and `PrimitiveIndex()` is a nice touch. I'll get used to it, this   
+is my first actual work with DXR so I am still learning                         
+
+● Makes sense — DXR has a lot of concepts to absorb at once. The mental model
+  that helps most: BLAS = "object-local BVH", TLAS = "world-level BVH over
+  instances". Once that clicks, the rest follows.
+
+  For your project specifically, the path forward is straightforward: one BLAS
+  of procedural AABBs, one intersection shader doing sphere intersection
+  (analytical, not even SDF marching needed for spheres), and your render passes
+   on top for the denoising experiments. The DXR boilerplate is the hard part —
+  once you have rays hitting spheres, you're at the interesting stuff fast.
+
+❯ Can I easily control how many rays / pixels are fired in a similar way that   
+compute shader's thread groups / thread counts are selected?                    
+
+● Yes — DispatchRays() takes a D3D12_DISPATCH_RAYS_DESC that includes a Width,
+  Height, and Depth. It works just like Dispatch() for compute, except each
+  thread directly maps to an invocation of your ray generation shader.
+
+  Typical setup: Width = render width, Height = render height, Depth = 1 — one
+  ray gen invocation per pixel. Inside the ray gen shader you get
+  DispatchRaysIndex() (equivalent to SV_DispatchThreadID) and
+  DispatchRaysDimensions() to know which pixel you're shading.
+
+  If you want multiple rays per pixel (e.g., for stochastic sampling / noisy
+  output for your denoising tests), you can either:
+
+  - Scale the dispatch dimensions — e.g., Width * 2, Height * 2 and downsample,
+  or Width, Height, N using Depth for multiple samples per pixel
+  - Loop in the ray gen shader — fire N rays per invocation with jittered
+  directions and accumulate
+
+  The loop approach is usually simpler and gives you direct control over the
+  sample count without changing dispatch dimensions or output UAV sizes.
+
+❯ Ah this is great because I did want to work with jittered values and          
+stochastic sampling on my own to understand this better. If I remember          
+correctly the standard approach is to generate jittered samples on CPU and      
+upload them to GPU right?                                                       
+
+● You can, but that's more the path tracing / offline renderer tradition. For
+  real-time DXR work, generating noise on the GPU is more common and simpler:
+
+  - Blue noise texture — precomputed, upload once, sample with
+  DispatchRaysIndex() + frame_index offset. Best quality-per-sample for
+  stochastic sampling.
+  - HLSL random in shader — hash-based RNG seeded with DispatchRaysIndex() +
+  frame_count. Something simple like a PCG or Wang hash. Zero CPU involvement.
+
+  CPU-side jitter tables make sense when you want deterministic, carefully
+  stratified sequences (Halton, Sobol) and control them across frames. But for
+  your use case — generating noisy images to test denoising — a simple GPU-side
+  hash or a blue noise texture is the path of least resistance. No upload, no
+  buffer management, and the noise properties are good enough to exercise your
+  denoising passes.
+
+  Start with a shader-side hash, get noisy images flowing, then swap in blue
+  noise later if you want to compare how noise distribution affects your
+  denoiser quality.
+
+❯ what I thought the idea was to take values off of an Halton sequence or       
+something? I remember seeing something like this in Unreal Engine's codebase I  
+think                                                                           
+
+● You're right, Halton sequences are widely used — UE uses a Halton(2,3)
+  sequence for TAA jitter and other stochastic effects. The key distinction:
+
+  Halton/Sobol/low-discrepancy sequences give you quasi-random samples that are
+  evenly distributed over time. This matters when you're accumulating across
+  frames — each frame's samples fill in gaps left by previous frames rather than
+   clumping randomly. This directly affects convergence speed for temporal
+  denoising.
+
+  So yes, for your project — noisy RT output + denoising — a Halton sequence is
+  a good fit. But you don't need to generate it on the CPU and upload it. You
+  can compute Halton values directly in the shader:
+
+  float halton(uint index, uint base) {
+      float f = 1.0;
+      float r = 0.0;
+      while (index > 0) {
+          f /= float(base);
+          r += f * float(index % base);
+          index /= base;
+      }
+      return r;
+  }
+
+  // In ray gen:
+  uint sample_index = frame_count + DispatchRaysIndex().x * 13 +
+  DispatchRaysIndex().y * 7;
+  float2 jitter = float2(halton(sample_index, 2), halton(sample_index, 3));
+
+  Bases 2 and 3 for the two dimensions — that's the classic Halton(2,3) you saw
+  in UE. Cheap to compute, no buffers, and gives you the low-discrepancy
+  property that makes temporal accumulation converge faster than pure random
+  noise.
