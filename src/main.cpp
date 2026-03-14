@@ -1,10 +1,14 @@
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
 
 #include <windows.h>
 #include <d3dcompiler.h>
 
 #include "renderer.hpp"
+
+render_scene g_scene;
 
 LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lparam) {
     switch (msg) {
@@ -25,7 +29,7 @@ LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lpara
         {
             renderer *r = reinterpret_cast<renderer*>(GetWindowLongPtr(hWindow, GWLP_USERDATA));
             if (r) {
-                render_draw(r);
+                render_draw(r, &g_scene);
             }
         }
         return 0;
@@ -74,6 +78,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     }
 
     render_init(&render, window, win_width, win_height, {});
+
+    //Create Scene ------------
+    constexpr int32_t sphere_count = 64;
+    constexpr float min_coord = -10.f;
+    constexpr float max_coord = 10.f;
+    constexpr float min_radius = 0.1f;
+    constexpr float max_radius = 5.f;
+
+    srand((unsigned)time(nullptr));
+    auto randf = [](float lo, float hi) {
+        return lo + (float)rand() / (float)RAND_MAX * (hi - lo);
+    };
+
+    for (int32_t i = 0; i < sphere_count; i++) {
+        g_scene.types[i] = 0;
+        g_scene.spheres[i] = {
+            randf(min_coord, max_coord),
+            randf(min_coord, max_coord),
+            randf(min_coord, max_coord),
+            randf(min_radius, max_radius)
+        };
+        g_scene.colors[i] = { randf(0.f, 1.f), randf(0.f, 1.f), randf(0.f, 1.f), 1.f };
+
+        g_scene.num_spheres++;
+    }
+
+    g_scene.camera.position = { 0.f, 0.f, -10.f, 1.f };
+    g_scene.camera.target = { 0.f, 0.f, 0.f, 1.f };
+    //-------------------------
 
     for (bool should_quit = false; !should_quit; ) {
         MSG m;

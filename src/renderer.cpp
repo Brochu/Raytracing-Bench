@@ -3,6 +3,8 @@
 #include <cassert>
 #include <cstdio>
 
+#define RESOURCE_VIEWS_MAX_COUNT 128
+
 #define CHECKHR(hr, msg) if (FAILED(hr)) { printf("[ERR] %s (0x%08X)\n", msg, (unsigned)hr); return; }
 
 static void wait_for_gpu(renderer *r) {
@@ -130,6 +132,17 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
         frame->fence_value = 0;
     }
 
+    // Main bindless heap
+    D3D12_DESCRIPTOR_HEAP_DESC main_heap_desc = {};
+    main_heap_desc.NumDescriptors = RESOURCE_VIEWS_MAX_COUNT;
+    main_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    main_heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    main_heap_desc.NodeMask = 0;
+    hr = r->device->CreateDescriptorHeap(&main_heap_desc, IID_PPV_ARGS(&r->main_heap));
+    CHECKHR(hr, "CreateDescriptorHeap (MAIN - Bindless)");
+
+    r->main_descriptor_size = r->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
     // Command list
     hr = r->device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, r->frame_res[0].cmd_alloc, nullptr, IID_PPV_ARGS(&r->cmd_list));
     CHECKHR(hr, "CreateCommandList");
@@ -139,6 +152,29 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     hr = r->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&r->fence));
     CHECKHR(hr, "CreateFence");
     r->fence_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+
+    // Root signature
+    D3D12_ROOT_PARAMETER1 param[1];
+    param[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    param[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    param[0].Constants.ShaderRegister = 0;
+    param[0].Constants.RegisterSpace = 0;
+    param[0].Constants.Num32BitValues = 4;
+
+    ID3DBlob *sig_blob;
+    ID3DBlob *err_blob;
+    D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_sig_desc = {};
+    root_sig_desc.Version = D3D_ROOT_SIGNATURE_VERSION_1_2;
+    root_sig_desc.Desc_1_2.Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED/* | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED*/;
+    root_sig_desc.Desc_1_2.NumParameters = 1;
+    root_sig_desc.Desc_1_2.pParameters = param;
+
+    hr = D3D12SerializeVersionedRootSignature(&root_sig_desc, &sig_blob, &err_blob);
+    if (err_blob != nullptr) {
+        printf("[RENDER] RootSignature ERR: '%s'\n", (char *)err_blob->GetBufferPointer());
+        assert(false);
+    }
+    hr = r->device->CreateRootSignature(0, sig_blob->GetBufferPointer(), sig_blob->GetBufferSize(), IID_PPV_ARGS(&r->root_sig));
 
     // Register render passes
     assert(pass_list.size() <= PASS_MAX_COUNT);
@@ -159,6 +195,7 @@ void render_draw(renderer *r, render_scene *scene) {
 
     frame->cmd_alloc->Reset();
     r->cmd_list->Reset(frame->cmd_alloc, nullptr);
+    r->cmd_list->SetDescriptorHeaps(1, &r->main_heap);
 
     // Transition back buffer: present -> render target
     D3D12_RESOURCE_BARRIER barrier = {};
@@ -174,6 +211,8 @@ void render_draw(renderer *r, render_scene *scene) {
     rtv.ptr += r->frame_index * r->rtv_descriptor_size;
     float clear_color[4] = {0.392f, 0.584f, 0.929f, 1.f};
     r->cmd_list->ClearRenderTargetView(rtv, clear_color, 0, nullptr);
+
+    r->cmd_list->SetGraphicsRootSignature(r->root_sig);
 
     // Transition back buffer: render target -> present
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -204,7 +243,16 @@ void render_stop(renderer *r) {
     for (int32_t i = 0; i < FRAME_COUNT; i++) {
         if (r->frame_res[i].cmd_alloc) r->frame_res[i].cmd_alloc->Release();
         if (r->frame_res[i].back_buffer) r->frame_res[i].back_buffer->Release();
+        if (r->frame_res[i].scene_cb) r->frame_res[i].scene_cb->Release();
+        if (r->frame_res[i].rt_shader_table) r->frame_res[i].rt_shader_table->Release();
+        if (r->frame_res[i].rt_blas) r->frame_res[i].rt_blas->Release();
+        if (r->frame_res[i].rt_tlas) r->frame_res[i].rt_tlas->Release();
+        if (r->frame_res[i].rt_scratch) r->frame_res[i].rt_scratch->Release();
+        if (r->frame_res[i].rt_out) r->frame_res[i].rt_out->Release();
     }
+    if (r->rt_pso) r->rt_pso->Release();
+    if (r->root_sig) r->root_sig->Release();
+    if (r->main_heap) r->main_heap->Release();
     if (r->rtv_heap) r->rtv_heap->Release();
     if (r->swapchain) r->swapchain->Release();
     if (r->cmd_queue) r->cmd_queue->Release();
