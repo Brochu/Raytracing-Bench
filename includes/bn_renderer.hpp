@@ -7,6 +7,8 @@
 #include <dxgi1_6.h>
 #include <DirectXMath.h>
 
+#include "dxcapi.h"
+
 constexpr uint32_t FRAME_COUNT = 2;
 constexpr uint32_t PASS_MAX_COUNT = 16;
 
@@ -52,6 +54,11 @@ struct renderer {
     uint32_t rtv_descriptor_size;
     ID3D12DescriptorHeap *main_heap;
     uint32_t main_descriptor_size;
+
+    IDxcBlob *raygen_shader;
+    IDxcBlob *miss_shader;
+    IDxcBlob *int_shader;
+    IDxcBlob *closehit_shader;
 
     uint32_t frame_index;
     uint32_t width;

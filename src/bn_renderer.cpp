@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <locale>
 
 #define RESOURCE_VIEWS_MAX_COUNT 128
 
@@ -310,6 +311,17 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     hr = r->device->CreateRootSignature(0, sig_blob->GetBufferPointer(), sig_blob->GetBufferSize(), IID_PPV_ARGS(&r->root_sig));
     CHECKHR(hr, "CreateRootSignature");
     r->root_sig->SetName(L"RootSignature");
+    sig_blob->Release();
+    if (err_blob) {
+        err_blob->Release();
+    }
+
+    // Shaders
+    const wchar_t *shader_path = L".\\src\\shaders\\raytrace.hlsl";
+    r->raygen_shader = shaders_compile_file(shader_path, L"raygen_main", L"lib_6_8");
+    r->miss_shader = shaders_compile_file(shader_path, L"miss_background", L"lib_6_8");
+    r->int_shader = shaders_compile_file(shader_path, L"sphere_intersection", L"lib_6_8");
+    r->closehit_shader = shaders_compile_file(shader_path, L"closest_main", L"lib_6_8");
 
     // Pipeline state object
     D3D12_STATE_SUBOBJECT sub_objects[2];
@@ -468,6 +480,10 @@ void render_stop(renderer *r) {
     }
 
     shaders_release();
+    if (r->closehit_shader) r->closehit_shader->Release();
+    if (r->int_shader) r->int_shader->Release();
+    if (r->miss_shader) r->miss_shader->Release();
+    if (r->raygen_shader) r->raygen_shader->Release();
 
     if (r->fence_event) CloseHandle(r->fence_event);
     if (r->fence) r->fence->Release();
