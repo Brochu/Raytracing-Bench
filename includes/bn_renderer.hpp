@@ -21,8 +21,10 @@ struct frame_resources {
     ID3D12Resource *rt_shader_table;
     ID3D12Resource *rt_blas;
     ID3D12Resource *rt_tlas;
+    ID3D12Resource *rt_tlas_inst;
     ID3D12Resource *rt_scratch;
     ID3D12Resource *rt_out;
+    ID3D12Resource *rt_aabbs;
 
     uint64_t fence_value;
 };

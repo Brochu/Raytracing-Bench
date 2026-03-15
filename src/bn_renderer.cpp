@@ -70,6 +70,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&r->device));
     adapter->Release();
     CHECKHR(hr, "D3D12CreateDevice");
+    r->device->SetName(L"Dx12_Device");
 
     // Verify DXR support
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 opts5 = {};
@@ -86,6 +87,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     hr = r->device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&r->cmd_queue));
     CHECKHR(hr, "CreateCommandQueue");
+    r->cmd_queue->SetName(L"CmdQueue");
 
     // Swap chain
     DXGI_SWAP_CHAIN_DESC1 sc_desc = {};
@@ -114,6 +116,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     rtv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     hr = r->device->CreateDescriptorHeap(&rtv_heap_desc, IID_PPV_ARGS(&r->rtv_heap));
     CHECKHR(hr, "CreateDescriptorHeap (RTV)");
+    r->rtv_heap->SetName(L"RTV_Heap");
 
     r->rtv_descriptor_size = r->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
@@ -125,6 +128,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     main_heap_desc.NodeMask = 0;
     hr = r->device->CreateDescriptorHeap(&main_heap_desc, IID_PPV_ARGS(&r->main_heap));
     CHECKHR(hr, "CreateDescriptorHeap (MAIN - Bindless)");
+    r->main_heap->SetName(L"Main_Heap");
 
     r->main_descriptor_size = r->device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
@@ -135,6 +139,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
 
         hr = r->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame->cmd_alloc));
         CHECKHR(hr, "CreateCommandAllocator");
+        frame->cmd_alloc->SetName(L"CmdAllocator");
 
         // DXR output UAV (one per frame in flight)
         D3D12_HEAP_PROPERTIES rt_out_heap_props = {};
@@ -155,6 +160,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
             &rt_out_desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             nullptr, IID_PPV_ARGS(&frame->rt_out));
         CHECKHR(hr, "CreateCommittedResource (rt_out)");
+        frame->rt_out->SetName(L"RT_Output");
 
         // UAV descriptor in main bindless heap (frame 0 = index 0, frame 1 = index 1)
         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
@@ -165,6 +171,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
 
         hr = r->swapchain->GetBuffer(i, IID_PPV_ARGS(&frame->back_buffer));
         CHECKHR(hr, "GetBuffer");
+        frame->back_buffer->SetName(L"BackBuffer");
         r->device->CreateRenderTargetView(frame->back_buffer, nullptr, rtv_handle);
         rtv_handle.ptr += r->rtv_descriptor_size;
 
@@ -174,7 +181,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     // Acceleration structure buffers (per frame)
     D3D12_RAYTRACING_GEOMETRY_DESC geo_desc = {};
     geo_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
-    geo_desc.AABBs.AABBCount = 128;
+    geo_desc.AABBs.AABBCount = RESOURCE_VIEWS_MAX_COUNT;
     geo_desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
     geo_desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
 
@@ -221,6 +228,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
             &buf_desc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
             nullptr, IID_PPV_ARGS(&frame->rt_blas));
         CHECKHR(hr, "CreateCommittedResource (rt_blas)");
+        frame->rt_blas->SetName(L"RT_BLAS");
 
         buf_desc.Width = tlas_info.ResultDataMaxSizeInBytes;
         hr = r->device->CreateCommittedResource(
@@ -228,6 +236,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
             &buf_desc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
             nullptr, IID_PPV_ARGS(&frame->rt_tlas));
         CHECKHR(hr, "CreateCommittedResource (rt_tlas)");
+        frame->rt_tlas->SetName(L"RT_TLAS");
 
         buf_desc.Width = scratch_size;
         hr = r->device->CreateCommittedResource(
@@ -235,16 +244,46 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
             &buf_desc, D3D12_RESOURCE_STATE_COMMON,
             nullptr, IID_PPV_ARGS(&frame->rt_scratch));
         CHECKHR(hr, "CreateCommittedResource (rt_scratch)");
+        frame->rt_scratch->SetName(L"RT_Scratch");
+
+        D3D12_HEAP_PROPERTIES upload_heap = {};
+        upload_heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+        D3D12_RESOURCE_DESC upload_desc = {};
+        upload_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        upload_desc.Height = 1;
+        upload_desc.DepthOrArraySize = 1;
+        upload_desc.MipLevels = 1;
+        upload_desc.SampleDesc.Count = 1;
+        upload_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        upload_desc.Width = RESOURCE_VIEWS_MAX_COUNT * sizeof(D3D12_RAYTRACING_AABB);
+        hr = r->device->CreateCommittedResource(
+            &upload_heap, D3D12_HEAP_FLAG_NONE,
+            &upload_desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&frame->rt_aabbs));
+        CHECKHR(hr, "CreateCommittedResource (rt_aabbs)");
+        frame->rt_aabbs->SetName(L"RT_AABBs");
+
+        upload_desc.Width = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+        hr = r->device->CreateCommittedResource(
+            &upload_heap, D3D12_HEAP_FLAG_NONE,
+            &upload_desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&frame->rt_tlas_inst));
+        CHECKHR(hr, "CreateCommittedResource (rt_tlas_inst)");
+        frame->rt_tlas_inst->SetName(L"RT_TLAS_Instance");
     }
 
     // Command list
     hr = r->device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, r->frame_res[0].cmd_alloc, nullptr, IID_PPV_ARGS(&r->cmd_list));
     CHECKHR(hr, "CreateCommandList");
+    r->cmd_list->SetName(L"CmdList");
     r->cmd_list->Close();
 
     // Fence
     hr = r->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&r->fence));
     CHECKHR(hr, "CreateFence");
+    r->fence->SetName(L"Fence");
     r->fence_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
     // Root signature
@@ -270,6 +309,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     }
     hr = r->device->CreateRootSignature(0, sig_blob->GetBufferPointer(), sig_blob->GetBufferSize(), IID_PPV_ARGS(&r->root_sig));
     CHECKHR(hr, "CreateRootSignature");
+    r->root_sig->SetName(L"RootSignature");
 
     // Pipeline state object
     D3D12_STATE_SUBOBJECT sub_objects[2];
@@ -290,6 +330,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     state_desc.pSubobjects = sub_objects;
     hr = r->device->CreateStateObject(&state_desc, IID_PPV_ARGS(&r->rt_state));
     CHECKHR(hr, "CreateStateObject");
+    r->rt_state->SetName(L"RT_StateObject");
 
     // Register render passes
     assert(pass_list.size() <= PASS_MAX_COUNT);
@@ -330,6 +371,79 @@ void render_draw(renderer *r, render_scene *scene) {
     r->cmd_list->SetGraphicsRootSignature(r->root_sig);
     r->cmd_list->SetPipelineState1(r->rt_state);
 
+    // Upload AABBs from spheres
+    D3D12_RAYTRACING_AABB *aabbs = nullptr;
+    frame->rt_aabbs->Map(0, nullptr, (void **)&aabbs);
+    for (int32_t i = 0; i < scene->num_spheres; i++) {
+        float cx = scene->spheres[i].x;
+        float cy = scene->spheres[i].y;
+        float cz = scene->spheres[i].z;
+        float rad = scene->spheres[i].w;
+        aabbs[i].MinX = cx - rad;
+        aabbs[i].MinY = cy - rad;
+        aabbs[i].MinZ = cz - rad;
+        aabbs[i].MaxX = cx + rad;
+        aabbs[i].MaxY = cy + rad;
+        aabbs[i].MaxZ = cz + rad;
+    }
+    frame->rt_aabbs->Unmap(0, nullptr);
+
+    // Build BLAS
+    D3D12_RAYTRACING_GEOMETRY_DESC geo_desc = {};
+    geo_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+    geo_desc.AABBs.AABBCount = scene->num_spheres;
+    geo_desc.AABBs.AABBs.StartAddress = frame->rt_aabbs->GetGPUVirtualAddress();
+    geo_desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+    geo_desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
+    blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+    blas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    blas_inputs.NumDescs = 1;
+    blas_inputs.pGeometryDescs = &geo_desc;
+    blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC blas_desc = {};
+    blas_desc.DestAccelerationStructureData = frame->rt_blas->GetGPUVirtualAddress();
+    blas_desc.ScratchAccelerationStructureData = frame->rt_scratch->GetGPUVirtualAddress();
+    blas_desc.Inputs = blas_inputs;
+
+    r->cmd_list->BuildRaytracingAccelerationStructure(&blas_desc, 0, nullptr);
+
+    // UAV barriers between BLAS and TLAS builds (result + shared scratch)
+    D3D12_RESOURCE_BARRIER uav_barriers[2] = {};
+    uav_barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uav_barriers[0].UAV.pResource = frame->rt_blas;
+    uav_barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uav_barriers[1].UAV.pResource = frame->rt_scratch;
+    r->cmd_list->ResourceBarrier(2, uav_barriers);
+
+    // Upload TLAS instance desc
+    D3D12_RAYTRACING_INSTANCE_DESC *instance = nullptr;
+    frame->rt_tlas_inst->Map(0, nullptr, (void **)&instance);
+    *instance = {};
+    instance->Transform[0][0] = 1.0f;
+    instance->Transform[1][1] = 1.0f;
+    instance->Transform[2][2] = 1.0f;
+    instance->InstanceMask = 0xFF;
+    instance->AccelerationStructure = frame->rt_blas->GetGPUVirtualAddress();
+    frame->rt_tlas_inst->Unmap(0, nullptr);
+
+    // Build TLAS
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlas_inputs = {};
+    tlas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    tlas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    tlas_inputs.NumDescs = 1;
+    tlas_inputs.InstanceDescs = frame->rt_tlas_inst->GetGPUVirtualAddress();
+    tlas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC tlas_desc = {};
+    tlas_desc.DestAccelerationStructureData = frame->rt_tlas->GetGPUVirtualAddress();
+    tlas_desc.ScratchAccelerationStructureData = frame->rt_scratch->GetGPUVirtualAddress();
+    tlas_desc.Inputs = tlas_inputs;
+
+    r->cmd_list->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
+
     // Transition back buffer: render target -> present
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
@@ -367,6 +481,8 @@ void render_stop(renderer *r) {
         if (r->frame_res[i].rt_tlas) r->frame_res[i].rt_tlas->Release();
         if (r->frame_res[i].rt_scratch) r->frame_res[i].rt_scratch->Release();
         if (r->frame_res[i].rt_out) r->frame_res[i].rt_out->Release();
+        if (r->frame_res[i].rt_aabbs) r->frame_res[i].rt_aabbs->Release();
+        if (r->frame_res[i].rt_tlas_inst) r->frame_res[i].rt_tlas_inst->Release();
     }
     if (r->rt_state) r->rt_state->Release();
     if (r->root_sig) r->root_sig->Release();
