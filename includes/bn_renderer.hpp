@@ -55,10 +55,7 @@ struct renderer {
     ID3D12DescriptorHeap *main_heap;
     uint32_t main_descriptor_size;
 
-    IDxcBlob *raygen_shader;
-    IDxcBlob *miss_shader;
-    IDxcBlob *int_shader;
-    IDxcBlob *closehit_shader;
+    IDxcBlob *rt_shaders_blob;
 
     uint32_t frame_index;
     uint32_t width;
