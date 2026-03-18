@@ -273,6 +273,14 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
             nullptr, IID_PPV_ARGS(&frame->rt_tlas_inst));
         CHECKHR(hr, "CreateCommittedResource (rt_tlas_inst)");
         frame->rt_tlas_inst->SetName(L"RT_TLAS_Instance");
+
+        upload_desc.Width = sizeof(render_cbuffer);
+        hr = r->device->CreateCommittedResource(
+            &upload_heap, D3D12_HEAP_FLAG_NONE,
+            &upload_desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&frame->scene_cb));
+        CHECKHR(hr, "CreateCommittedResource (scene_cb)");
+        frame->scene_cb->SetName(L"Scene_CB");
     }
 
     // Command list
@@ -321,25 +329,92 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     r->rt_shaders_blob = shaders_compile_file(shader_path, L"lib_6_8");
 
     // Pipeline state object
-    D3D12_STATE_SUBOBJECT sub_objects[2];
-    D3D12_GLOBAL_ROOT_SIGNATURE global_rs;
+    constexpr int32_t num_subobjects = 5;
+    D3D12_STATE_SUBOBJECT sub_objects[num_subobjects];
+
+    D3D12_DXIL_LIBRARY_DESC lib_desc = {};
+    lib_desc.DXILLibrary = D3D12_SHADER_BYTECODE { r->rt_shaders_blob->GetBufferPointer(), r->rt_shaders_blob->GetBufferSize() };
+    sub_objects[0].Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+    sub_objects[0].pDesc = &lib_desc;
+
+    D3D12_HIT_GROUP_DESC hit_group = {};
+    hit_group.HitGroupExport = L"SphereHitGroup";
+    hit_group.Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+    hit_group.IntersectionShaderImport = L"sphere_intersection";
+    hit_group.ClosestHitShaderImport = L"closest_main";
+    hit_group.AnyHitShaderImport = nullptr;
+    sub_objects[1].Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+    sub_objects[1].pDesc = &hit_group;
+
+    D3D12_GLOBAL_ROOT_SIGNATURE global_rs = {};
     global_rs.pGlobalRootSignature = r->root_sig;
-    sub_objects[0].Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
-    sub_objects[0].pDesc = &global_rs;
+    sub_objects[2].Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
+    sub_objects[2].pDesc = &global_rs;
 
     D3D12_RAYTRACING_PIPELINE_CONFIG1 rt_config = {};
     rt_config.MaxTraceRecursionDepth = 5;
     rt_config.Flags = D3D12_RAYTRACING_PIPELINE_FLAG_NONE;
-    sub_objects[1].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG1;
-    sub_objects[1].pDesc = &rt_config;
+    sub_objects[3].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG1;
+    sub_objects[3].pDesc = &rt_config;
+
+    D3D12_RAYTRACING_SHADER_CONFIG config = {};
+    config.MaxPayloadSizeInBytes = 32;
+    config.MaxAttributeSizeInBytes = 32;
+    sub_objects[4].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
+    sub_objects[4].pDesc = &config;
 
     D3D12_STATE_OBJECT_DESC state_desc = {};
     state_desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
-    state_desc.NumSubobjects = 2;
+    state_desc.NumSubobjects = num_subobjects;
     state_desc.pSubobjects = sub_objects;
     hr = r->device->CreateStateObject(&state_desc, IID_PPV_ARGS(&r->rt_state));
     CHECKHR(hr, "CreateStateObject");
     r->rt_state->SetName(L"RT_StateObject");
+
+    // Shader table
+    ID3D12StateObjectProperties *rt_props = nullptr;
+    hr = r->rt_state->QueryInterface(IID_PPV_ARGS(&rt_props));
+    CHECKHR(hr, "QueryInterface (StateObjectProperties)");
+
+    void *raygen_id    = rt_props->GetShaderIdentifier(L"raygen_main");
+    void *miss_id      = rt_props->GetShaderIdentifier(L"miss_background");
+    void *hit_group_id = rt_props->GetShaderIdentifier(L"SphereHitGroup");
+
+    // Layout: raygen at 0, miss at 64, hit group at 128 (64-byte aligned sections)
+    UINT record_size = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // 32 bytes
+    UINT table_size  = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT * 2 + record_size; // 160 bytes
+
+    D3D12_HEAP_PROPERTIES upload_heap = {};
+    upload_heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC table_desc = {};
+    table_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    table_desc.Width = table_size;
+    table_desc.Height = 1;
+    table_desc.DepthOrArraySize = 1;
+    table_desc.MipLevels = 1;
+    table_desc.SampleDesc.Count = 1;
+    table_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    for (int32_t i = 0; i < FRAME_COUNT; i++) {
+        frame_resources *frame = &r->frame_res[i];
+
+        hr = r->device->CreateCommittedResource(
+            &upload_heap, D3D12_HEAP_FLAG_NONE,
+            &table_desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&frame->rt_shader_table));
+        CHECKHR(hr, "CreateCommittedResource (rt_shader_table)");
+        frame->rt_shader_table->SetName(L"RT_ShaderTable");
+
+        uint8_t *mapped = nullptr;
+        frame->rt_shader_table->Map(0, nullptr, (void **)&mapped);
+        memcpy(mapped, raygen_id, record_size);
+        memcpy(mapped + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT, miss_id, record_size);
+        memcpy(mapped + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT * 2, hit_group_id, record_size);
+        frame->rt_shader_table->Unmap(0, nullptr);
+    }
+
+    rt_props->Release();
 
     // Register render passes
     assert(pass_list.size() <= PASS_MAX_COUNT);
@@ -358,6 +433,24 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
 void render_draw(renderer *r, render_scene *scene) {
     frame_resources *frame = &r->frame_res[r->frame_index];
 
+    // Upload AABBs from spheres
+    D3D12_RAYTRACING_AABB *aabbs = nullptr;
+    frame->rt_aabbs->Map(0, nullptr, (void **)&aabbs);
+    for (int32_t i = 0; i < scene->num_spheres; i++) {
+        float cx = scene->spheres[i].x;
+        float cy = scene->spheres[i].y;
+        float cz = scene->spheres[i].z;
+        float rad = scene->spheres[i].w;
+        aabbs[i].MinX = cx - rad;
+        aabbs[i].MinY = cy - rad;
+        aabbs[i].MinZ = cz - rad;
+        aabbs[i].MaxX = cx + rad;
+        aabbs[i].MaxY = cy + rad;
+        aabbs[i].MaxZ = cz + rad;
+    }
+    frame->rt_aabbs->Unmap(0, nullptr);
+
+    // Render commands
     frame->cmd_alloc->Reset();
     r->cmd_list->Reset(frame->cmd_alloc, nullptr);
     r->cmd_list->SetDescriptorHeaps(1, &r->main_heap);
@@ -379,23 +472,6 @@ void render_draw(renderer *r, render_scene *scene) {
 
     r->cmd_list->SetGraphicsRootSignature(r->root_sig);
     r->cmd_list->SetPipelineState1(r->rt_state);
-
-    // Upload AABBs from spheres
-    D3D12_RAYTRACING_AABB *aabbs = nullptr;
-    frame->rt_aabbs->Map(0, nullptr, (void **)&aabbs);
-    for (int32_t i = 0; i < scene->num_spheres; i++) {
-        float cx = scene->spheres[i].x;
-        float cy = scene->spheres[i].y;
-        float cz = scene->spheres[i].z;
-        float rad = scene->spheres[i].w;
-        aabbs[i].MinX = cx - rad;
-        aabbs[i].MinY = cy - rad;
-        aabbs[i].MinZ = cz - rad;
-        aabbs[i].MaxX = cx + rad;
-        aabbs[i].MaxY = cy + rad;
-        aabbs[i].MaxZ = cz + rad;
-    }
-    frame->rt_aabbs->Unmap(0, nullptr);
 
     // Build BLAS
     D3D12_RAYTRACING_GEOMETRY_DESC geo_desc = {};

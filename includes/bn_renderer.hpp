@@ -67,6 +67,21 @@ struct renderer {
     uint32_t current_pass_id = 0;
 };
 
+struct render_cbuffer {
+    DirectX::XMFLOAT4X4 view_proj;
+    DirectX::XMFLOAT4X4 inv_view_proj;
+    DirectX::XMFLOAT4 cam_position;
+
+    uint32_t width;
+    uint32_t height;
+
+    uint32_t num_spheres;
+    uint32_t _pad;
+    DirectX::XMFLOAT4 spheres[128];
+    DirectX::XMFLOAT4 colors[128];
+    int32_t types[128];
+};
+
 struct render_cam {
     DirectX::XMFLOAT4 position;
     DirectX::XMFLOAT4 target;
