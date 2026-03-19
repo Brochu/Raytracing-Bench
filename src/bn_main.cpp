@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <cmath>
 
 #include <windows.h>
 #include <d3dcompiler.h>
@@ -9,6 +10,18 @@
 #include "bn_renderer.hpp"
 
 render_scene g_scene;
+
+static bool  g_mouse_down  = false;
+static POINT g_mouse_last  = {};
+
+static void update_orbit_camera() {
+    render_cam *cam = &g_scene.camera;
+    float x = cam->orbit_dist * cosf(cam->orbit_pitch) * sinf(cam->orbit_yaw);
+    float y = cam->orbit_dist * sinf(cam->orbit_pitch);
+    float z = cam->orbit_dist * cosf(cam->orbit_pitch) * cosf(cam->orbit_yaw);
+    cam->position = { x, y, z, 1.f };
+    cam->target   = { 0.f, 0.f, 0.f, 1.f };
+}
 
 LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lparam) {
     switch (msg) {
@@ -23,6 +36,36 @@ LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lpara
     case WM_DESTROY:
     case WM_CLOSE:
         PostQuitMessage(0);
+        return 0;
+
+    case WM_LBUTTONDOWN:
+        g_mouse_down = true;
+        g_mouse_last = { (LONG)LOWORD(lparam), (LONG)HIWORD(lparam) };
+        SetCapture(hWindow);
+        return 0;
+
+    case WM_LBUTTONUP:
+        g_mouse_down = false;
+        ReleaseCapture();
+        return 0;
+
+    case WM_MOUSEMOVE:
+        if (g_mouse_down) {
+            POINT cur = { (LONG)LOWORD(lparam), (LONG)HIWORD(lparam) };
+            float dx = (float)(cur.x - g_mouse_last.x);
+            float dy = (float)(cur.y - g_mouse_last.y);
+            g_mouse_last = cur;
+
+            g_scene.camera.orbit_yaw   += dx * 0.005f;
+            g_scene.camera.orbit_pitch += dy * 0.005f;
+
+            // Clamp pitch to avoid flipping
+            float limit = 1.5f;
+            if (g_scene.camera.orbit_pitch >  limit) g_scene.camera.orbit_pitch =  limit;
+            if (g_scene.camera.orbit_pitch < -limit) g_scene.camera.orbit_pitch = -limit;
+
+            update_orbit_camera();
+        }
         return 0;
 
     case WM_PAINT:
@@ -103,8 +146,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     }
     g_scene.num_spheres = sphere_count;
 
-    g_scene.camera.position = { 0.f, 0.f, -25.f, 1.f };
-    g_scene.camera.target = { 0.f, 0.f, 0.f, 1.f };
+    update_orbit_camera();
     //-------------------------
 
     for (bool should_quit = false; !should_quit; ) {

@@ -88,6 +88,10 @@ struct render_cam {
     float fov = 60.f;
     float near_z = 0.1f;
     float far_z = 1000.f;
+
+    float orbit_yaw   = 3.14159265f;
+    float orbit_pitch = 0.f;
+    float orbit_dist  = 25.f;
 };
 
 struct render_scene {
