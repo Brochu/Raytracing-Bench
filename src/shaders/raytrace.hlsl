@@ -15,7 +15,7 @@ cbuffer SceneCB : register(b0) {
 
 struct [raypayload] RayPayload {
     float4 color : read(caller) : write(caller, miss, closesthit);
-    //uint recursion_depth : read() : write();
+    float screen_uv_y : read(miss) : write(caller);
 };
 
 struct ProceduralPrimitiveAttributes {
@@ -53,7 +53,7 @@ void raygen_main() {
 
     RayPayload payload;
     payload.color = float4(0, 0, 0, 1);
-    //payload.recursion_depth = 0;
+    payload.screen_uv_y = (pixel.y + 0.5f) / (float)height;
 
     TraceRay(tlas, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
 
@@ -62,10 +62,8 @@ void raygen_main() {
 
 [shader("miss")]
 void miss_background(inout RayPayload payload) {
-    float t = saturate(WorldRayDirection().y * 0.5f + 0.5f);
-    float3 pale_blue = float3(0.4f, 0.6f, 1.0f);
-
-    payload.color = float4(lerp(pale_blue, float3(1, 1, 1), t), 1.0f);
+    float a = 1.0f - payload.screen_uv_y;
+    payload.color = float4((1.0f - a) * float3(1, 1, 1) + a * float3(0.5f, 0.7f, 1.0f), 1.0f);
 }
 
 [shader("intersection")]
