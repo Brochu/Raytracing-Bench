@@ -84,7 +84,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     constexpr float min_coord = -10.f;
     constexpr float max_coord = 10.f;
     constexpr float min_radius = 0.1f;
-    constexpr float max_radius = 5.f;
+    constexpr float max_radius = 2.f;
 
     srand((unsigned)time(nullptr));
     auto randf = [](float lo, float hi) {
@@ -100,11 +100,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
             randf(min_radius, max_radius)
         };
         g_scene.colors[i] = { randf(0.f, 1.f), randf(0.f, 1.f), randf(0.f, 1.f), 1.f };
-
-        g_scene.num_spheres++;
     }
+    g_scene.num_spheres = sphere_count;
 
-    g_scene.camera.position = { 0.f, 0.f, -10.f, 1.f };
+    g_scene.camera.position = { 0.f, 0.f, -25.f, 1.f };
     g_scene.camera.target = { 0.f, 0.f, 0.f, 1.f };
     //-------------------------
 

@@ -76,7 +76,7 @@ struct render_cbuffer {
     uint32_t height;
 
     uint32_t num_spheres;
-    uint32_t _pad;
+    uint32_t frame_index;
     DirectX::XMFLOAT4 spheres[128];
     DirectX::XMFLOAT4 colors[128];
     int32_t types[128];
@@ -85,6 +85,9 @@ struct render_cbuffer {
 struct render_cam {
     DirectX::XMFLOAT4 position;
     DirectX::XMFLOAT4 target;
+    float fov = 60.f;
+    float near_z = 0.1f;
+    float far_z = 1000.f;
 };
 
 struct render_scene {

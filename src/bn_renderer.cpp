@@ -3,11 +3,14 @@
 
 #include <cassert>
 #include <cstdio>
-#include <locale>
 
 #define RESOURCE_VIEWS_MAX_COUNT 128
-
 #define CHECKHR(hr, msg) if (FAILED(hr)) { printf("[ERR] %s (0x%08X)\n", msg, (unsigned)hr); return; }
+
+template<typename T>
+inline T Align(T value, T align) {
+    return (value + align - 1) & ~(align-1);
+};
 
 static void wait_for_gpu(renderer *r) {
     uint64_t val = ++r->frame_res[r->frame_index].fence_value;
@@ -274,13 +277,23 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
         CHECKHR(hr, "CreateCommittedResource (rt_tlas_inst)");
         frame->rt_tlas_inst->SetName(L"RT_TLAS_Instance");
 
-        upload_desc.Width = sizeof(render_cbuffer);
+        upload_desc.Width = Align(sizeof(render_cbuffer), (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
         hr = r->device->CreateCommittedResource(
             &upload_heap, D3D12_HEAP_FLAG_NONE,
             &upload_desc, D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr, IID_PPV_ARGS(&frame->scene_cb));
         CHECKHR(hr, "CreateCommittedResource (scene_cb)");
         frame->scene_cb->SetName(L"Scene_CB");
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.RaytracingAccelerationStructure.Location = frame->rt_tlas->GetGPUVirtualAddress();
+
+        D3D12_CPU_DESCRIPTOR_HANDLE srv_handle = r->main_heap->GetCPUDescriptorHandleForHeapStart();
+        srv_handle.ptr += (2 + i) * r->main_descriptor_size;
+        r->device->CreateShaderResourceView(nullptr, &srv_desc, srv_handle);
     }
 
     // Command list
@@ -297,11 +310,11 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
 
     // Root signature
     D3D12_ROOT_PARAMETER1 param[1];
-    param[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    param[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     param[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    param[0].Constants.ShaderRegister = 0;
-    param[0].Constants.RegisterSpace = 0;
-    param[0].Constants.Num32BitValues = 4;
+    param[0].Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE;
+    param[0].Descriptor.ShaderRegister = 0;
+    param[0].Descriptor.RegisterSpace = 0;
 
     ID3DBlob *sig_blob;
     ID3DBlob *err_blob;
@@ -450,27 +463,43 @@ void render_draw(renderer *r, render_scene *scene) {
     }
     frame->rt_aabbs->Unmap(0, nullptr);
 
+    // Upload frame CBV data
+    render_cbuffer *cbuffer = nullptr;
+    frame->scene_cb->Map(0, nullptr, (void**)&cbuffer);
+    cbuffer->width = r->width;
+    cbuffer->height = r->height;
+    cbuffer->cam_position = scene->camera.position;
+    cbuffer->num_spheres = scene->num_spheres;
+    cbuffer->frame_index = r->frame_index;
+    memcpy_s(&cbuffer->spheres, 3*128*sizeof(DirectX::XMFLOAT4), &scene->spheres, 3*128*sizeof(DirectX::XMFLOAT4));
+
+    DirectX::XMVECTOR eye    = DirectX::XMLoadFloat4(&scene->camera.position);
+    DirectX::XMVECTOR target = DirectX::XMLoadFloat4(&scene->camera.target);
+    DirectX::XMVECTOR up     = DirectX::XMVectorSet(0.f, 1.f, 0.f, 0.f);
+
+    DirectX::XMMATRIX view = DirectX::XMMatrixLookAtLH(eye, target, up);
+    DirectX::XMMATRIX proj = DirectX::XMMatrixPerspectiveFovLH(
+        DirectX::XMConvertToRadians(scene->camera.fov),
+        (float)r->width / (float)r->height,
+        scene->camera.near_z, scene->camera.far_z
+    );
+
+    DirectX::XMMATRIX vp     = view * proj;
+    DirectX::XMMATRIX inv_vp = DirectX::XMMatrixInverse(nullptr, vp);
+
+    DirectX::XMStoreFloat4x4(&cbuffer->view_proj, DirectX::XMMatrixTranspose(vp));
+    DirectX::XMStoreFloat4x4(&cbuffer->inv_view_proj, DirectX::XMMatrixTranspose(inv_vp));
+    frame->scene_cb->Unmap(0, nullptr);
+    cbuffer = nullptr;
+
     // Render commands
     frame->cmd_alloc->Reset();
     r->cmd_list->Reset(frame->cmd_alloc, nullptr);
+
     r->cmd_list->SetDescriptorHeaps(1, &r->main_heap);
+    r->cmd_list->SetComputeRootSignature(r->root_sig);
+    r->cmd_list->SetComputeRootConstantBufferView(0, frame->scene_cb->GetGPUVirtualAddress());
 
-    // Transition back buffer: present -> render target
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Transition.pResource = frame->back_buffer;
-    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    r->cmd_list->ResourceBarrier(1, &barrier);
-
-    // Clear render target to black
-    D3D12_CPU_DESCRIPTOR_HANDLE rtv = r->rtv_heap->GetCPUDescriptorHandleForHeapStart();
-    rtv.ptr += r->frame_index * r->rtv_descriptor_size;
-    float clear_color[4] = {0.392f, 0.584f, 0.929f, 1.f};
-    r->cmd_list->ClearRenderTargetView(rtv, clear_color, 0, nullptr);
-
-    r->cmd_list->SetGraphicsRootSignature(r->root_sig);
     r->cmd_list->SetPipelineState1(r->rt_state);
 
     // Build BLAS
@@ -529,10 +558,58 @@ void render_draw(renderer *r, render_scene *scene) {
 
     r->cmd_list->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
 
-    // Transition back buffer: render target -> present
-    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-    r->cmd_list->ResourceBarrier(1, &barrier);
+    // UAV barrier: ensure TLAS build completes before DispatchRays
+    D3D12_RESOURCE_BARRIER tlas_barrier = {};
+    tlas_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    tlas_barrier.UAV.pResource = frame->rt_tlas;
+    r->cmd_list->ResourceBarrier(1, &tlas_barrier);
+
+    // DispatchRays
+    D3D12_GPU_VIRTUAL_ADDRESS table_base = frame->rt_shader_table->GetGPUVirtualAddress();
+
+    D3D12_DISPATCH_RAYS_DESC dispatch_desc = {};
+    dispatch_desc.RayGenerationShaderRecord.StartAddress  = table_base;
+    dispatch_desc.RayGenerationShaderRecord.SizeInBytes   = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    dispatch_desc.MissShaderTable.StartAddress  = table_base + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
+    dispatch_desc.MissShaderTable.SizeInBytes   = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    dispatch_desc.MissShaderTable.StrideInBytes = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    dispatch_desc.HitGroupTable.StartAddress  = table_base + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT * 2;
+    dispatch_desc.HitGroupTable.SizeInBytes   = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    dispatch_desc.HitGroupTable.StrideInBytes = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    dispatch_desc.Width  = r->width;
+    dispatch_desc.Height = r->height;
+    dispatch_desc.Depth  = 1;
+
+    r->cmd_list->DispatchRays(&dispatch_desc);
+
+    // Transition rt_output -> COPY_SOURCE, then copy to back buffer, then restore
+    D3D12_RESOURCE_BARRIER copy_barriers[2] = {};
+    copy_barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    copy_barriers[0].Transition.pResource = frame->rt_out;
+    copy_barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    copy_barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    copy_barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    copy_barriers[1].Transition.pResource = frame->back_buffer;
+    copy_barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    copy_barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+    copy_barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    r->cmd_list->ResourceBarrier(2, copy_barriers);
+
+    r->cmd_list->CopyResource(frame->back_buffer, frame->rt_out);
+
+    // Restore rt_output -> UAV, back buffer -> PRESENT
+    D3D12_RESOURCE_BARRIER restore_barriers[2] = {};
+    restore_barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    restore_barriers[0].Transition.pResource = frame->rt_out;
+    restore_barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    restore_barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    restore_barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    restore_barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    restore_barriers[1].Transition.pResource = frame->back_buffer;
+    restore_barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    restore_barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    restore_barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    r->cmd_list->ResourceBarrier(2, restore_barriers);
 
     r->cmd_list->Close();
 
