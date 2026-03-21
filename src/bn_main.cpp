@@ -60,9 +60,9 @@ LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lpara
             g_scene.camera.orbit_pitch += dy * 0.005f;
 
             // Clamp pitch to avoid flipping
-            float limit = 1.5f;
+            float limit = 1.0f;
             if (g_scene.camera.orbit_pitch >  limit) g_scene.camera.orbit_pitch =  limit;
-            if (g_scene.camera.orbit_pitch < -limit) g_scene.camera.orbit_pitch = -limit;
+            if (g_scene.camera.orbit_pitch < 0.25f) g_scene.camera.orbit_pitch = 0.25f;
 
             update_orbit_camera();
         }
@@ -124,9 +124,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
 
     //Create Scene ------------
     constexpr int32_t sphere_count = 64;
-    constexpr float min_coord = -10.f;
-    constexpr float max_coord = 10.f;
-    constexpr float min_radius = 0.1f;
+    constexpr float ground_y = 0.f;
+    constexpr float min_coord = -20.f;
+    constexpr float max_coord = 20.f;
+    constexpr float min_radius = 0.5f;
     constexpr float max_radius = 2.f;
 
     srand((unsigned)time(nullptr));
@@ -135,12 +136,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     };
 
     for (int32_t i = 0; i < sphere_count; i++) {
+        float radius = randf(min_radius, max_radius);
+
         g_scene.types[i] = 0;
         g_scene.spheres[i] = {
             randf(min_coord, max_coord),
+            ground_y + radius,
             randf(min_coord, max_coord),
-            randf(min_coord, max_coord),
-            randf(min_radius, max_radius)
+            radius
         };
         g_scene.colors[i] = { randf(0.f, 1.f), randf(0.f, 1.f), randf(0.f, 1.f), 1.f };
     }
