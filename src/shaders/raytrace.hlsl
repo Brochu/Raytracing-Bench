@@ -1,3 +1,6 @@
+// Maximum number of secondary bounces (total TraceRay calls = 1 primary + MAX_BOUNCES)
+static const uint MAX_BOUNCES = 4;
+
 cbuffer SceneCB : register(b0) {
     float4x4 view_proj;
     float4x4 inv_view_proj;
@@ -14,14 +17,54 @@ cbuffer SceneCB : register(b0) {
 };
 
 struct [raypayload] RayPayload {
-    float4 color : read(caller) : write(caller, miss, closesthit);
-    float screen_uv_y : read(miss) : write(caller);
+    float4 color      : read(caller) : write(miss);
+    float3 hit_pos    : read(caller) : write(closesthit);
+    float3 hit_normal : read(caller) : write(closesthit);
+    uint hit_index    : read(caller) : write(closesthit);
+    uint did_hit      : read(caller) : write(miss, closesthit);
 };
 
 struct ProceduralPrimitiveAttributes {
     float3 normal;
     uint sphere_index;
 };
+
+// --- RNG utilities ---
+
+uint hash(uint x) {
+    x ^= x >> 16;
+    x *= 0x45d9f3bu;
+    x ^= x >> 16;
+    x *= 0x45d9f3bu;
+    x ^= x >> 16;
+    return x;
+}
+
+float rand_float(inout uint seed) {
+    seed = hash(seed);
+    return float(seed) / 4294967295.0f;
+}
+
+float3 random_cosine_hemisphere(float3 normal, inout uint seed) {
+    float u1 = rand_float(seed);
+    float u2 = rand_float(seed);
+
+    float r = sqrt(u1);
+    float theta = 2.0f * 3.14159265f * u2;
+
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+    float z = sqrt(1.0f - u1);
+
+    // Build tangent frame from normal
+    float3 up = abs(normal.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0);
+    float3 tangent   = normalize(cross(up, normal));
+    float3 bitangent = cross(normal, tangent);
+
+    return normalize(tangent * x + bitangent * y + normal * z);
+}
+
+// --- Shaders ---
 
 [shader("raygeneration")]
 void raygen_main() {
@@ -45,25 +88,53 @@ void raygen_main() {
     float3 origin    = world_near.xyz;
     float3 direction = normalize(world_far.xyz - world_near.xyz);
 
-    RayDesc ray;
-    ray.Origin    = origin;
-    ray.Direction = direction;
-    ray.TMin      = 0.001f;
-    ray.TMax      = 10000.0f;
+    uint seed = hash(pixel.x * 1973 + pixel.y * 9277 + frame_index * 26699);
 
-    RayPayload payload;
-    payload.color = float4(0, 0, 0, 1);
-    payload.screen_uv_y = (pixel.y + 0.5f) / (float)height;
+    // Path tracing loop — throughput tracks how much light each bounce lets through
+    float3 throughput = float3(1, 1, 1);
+    float3 final_color = float3(0, 0, 0);
 
-    TraceRay(tlas, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
+    for (uint bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
+        RayDesc ray;
+        ray.Origin    = origin;
+        ray.Direction = direction;
+        ray.TMin      = 0.001f;
+        ray.TMax      = 10000.0f;
 
-    output[pixel] = payload.color;
+        RayPayload payload;
+        payload.color      = float4(0, 0, 0, 1);
+        payload.hit_pos    = float3(0, 0, 0);
+        payload.hit_normal = float3(0, 0, 0);
+        payload.hit_index  = 0;
+        payload.did_hit    = 0;
+
+        TraceRay(tlas, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
+
+        if (!payload.did_hit) {
+            // Ray escaped to sky — accumulate sky light modulated by throughput
+            final_color = throughput * payload.color.rgb;
+            break;
+        }
+
+        // Surface hit — modulate throughput by surface albedo
+        float3 albedo = colors[payload.hit_index].rgb;
+        throughput *= albedo;
+
+        // Set up next bounce
+        origin    = payload.hit_pos;
+        direction = random_cosine_hemisphere(payload.hit_normal, seed);
+    }
+
+    // If all bounces exhausted without reaching the sky, final_color stays black
+    output[pixel] = float4(final_color, 1.0f);
 }
 
 [shader("miss")]
 void miss_background(inout RayPayload payload) {
-    float a = 1.0f - payload.screen_uv_y;
-    payload.color = float4((1.0f - a) * float3(1, 1, 1) + a * float3(0.5f, 0.7f, 1.0f), 1.0f);
+    float3 dir = normalize(WorldRayDirection());
+    float a = 0.5f * (dir.y + 1.0f);
+    payload.color  = float4((1.0f - a) * float3(1, 1, 1) + a * float3(0.5f, 0.7f, 1.0f), 1.0f);
+    payload.did_hit = 0;
 }
 
 [shader("intersection")]
@@ -112,7 +183,8 @@ void sphere_intersection() {
 
 [shader("closesthit")]
 void closest_main(inout RayPayload payload, in ProceduralPrimitiveAttributes attributes) {
-    float3 view_dir = normalize(cam_position.xyz - (WorldRayOrigin() + RayTCurrent() * WorldRayDirection()));
-    float ndotv = saturate(dot(attributes.normal, view_dir));
-    payload.color = float4(colors[attributes.sphere_index].rgb * ndotv, 1.0f);
+    payload.hit_pos    = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
+    payload.hit_normal = normalize(attributes.normal);
+    payload.hit_index  = attributes.sphere_index;
+    payload.did_hit    = 1;
 }
