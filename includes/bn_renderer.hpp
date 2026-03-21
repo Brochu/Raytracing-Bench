@@ -9,6 +9,7 @@
 
 #include "dxcapi.h"
 
+constexpr uint32_t PRIMITIVE_MAX_COUNT = 128;
 constexpr uint32_t FRAME_COUNT = 2;
 constexpr uint32_t PASS_MAX_COUNT = 16;
 
@@ -77,9 +78,9 @@ struct render_cbuffer {
 
     uint32_t num_spheres;
     uint32_t frame_index;
-    DirectX::XMFLOAT4 spheres[128];
-    DirectX::XMFLOAT4 colors[128];
-    int32_t types[128];
+    DirectX::XMFLOAT4 spheres[PRIMITIVE_MAX_COUNT];
+    DirectX::XMFLOAT4 colors[PRIMITIVE_MAX_COUNT];
+    int32_t types[PRIMITIVE_MAX_COUNT];
 };
 
 struct render_cam {
@@ -90,14 +91,14 @@ struct render_cam {
     float far_z = 1000.f;
 
     float orbit_yaw   = 3.14159265f;
-    float orbit_pitch = 0.f;
+    float orbit_pitch = 0.4f;
     float orbit_dist  = 25.f;
 };
 
 struct render_scene {
-    DirectX::XMFLOAT4 spheres[128];
-    DirectX::XMFLOAT4 colors[128];
-    int32_t types[128];
+    DirectX::XMFLOAT4 spheres[PRIMITIVE_MAX_COUNT];
+    DirectX::XMFLOAT4 colors[PRIMITIVE_MAX_COUNT];
+    int32_t types[PRIMITIVE_MAX_COUNT];
 
     int32_t num_spheres = 0;
 

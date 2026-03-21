@@ -185,7 +185,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     // Acceleration structure buffers (per frame)
     D3D12_RAYTRACING_GEOMETRY_DESC geo_desc = {};
     geo_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
-    geo_desc.AABBs.AABBCount = RESOURCE_VIEWS_MAX_COUNT;
+    geo_desc.AABBs.AABBCount = PRIMITIVE_MAX_COUNT;
     geo_desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
     geo_desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
 
@@ -261,7 +261,7 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
         upload_desc.SampleDesc.Count = 1;
         upload_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-        upload_desc.Width = RESOURCE_VIEWS_MAX_COUNT * sizeof(D3D12_RAYTRACING_AABB);
+        upload_desc.Width = PRIMITIVE_MAX_COUNT * sizeof(D3D12_RAYTRACING_AABB);
         hr = r->device->CreateCommittedResource(
             &upload_heap, D3D12_HEAP_FLAG_NONE,
             &upload_desc, D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -365,13 +365,13 @@ void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::i
     sub_objects[2].pDesc = &global_rs;
 
     D3D12_RAYTRACING_PIPELINE_CONFIG1 rt_config = {};
-    rt_config.MaxTraceRecursionDepth = 5;
+    rt_config.MaxTraceRecursionDepth = 1;
     rt_config.Flags = D3D12_RAYTRACING_PIPELINE_FLAG_NONE;
     sub_objects[3].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG1;
     sub_objects[3].pDesc = &rt_config;
 
     D3D12_RAYTRACING_SHADER_CONFIG config = {};
-    config.MaxPayloadSizeInBytes = 32;
+    config.MaxPayloadSizeInBytes = 64;
     config.MaxAttributeSizeInBytes = 32;
     sub_objects[4].Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
     sub_objects[4].pDesc = &config;
