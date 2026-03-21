@@ -80,7 +80,7 @@ struct render_cbuffer {
     uint32_t frame_index;
     DirectX::XMFLOAT4 spheres[PRIMITIVE_MAX_COUNT];
     DirectX::XMFLOAT4 colors[PRIMITIVE_MAX_COUNT];
-    int32_t types[PRIMITIVE_MAX_COUNT];
+    DirectX::XMUINT4 materials[PRIMITIVE_MAX_COUNT];
 };
 
 struct render_cam {
@@ -98,7 +98,7 @@ struct render_cam {
 struct render_scene {
     DirectX::XMFLOAT4 spheres[PRIMITIVE_MAX_COUNT];
     DirectX::XMFLOAT4 colors[PRIMITIVE_MAX_COUNT];
-    int32_t types[PRIMITIVE_MAX_COUNT];
+    DirectX::XMUINT4 materials[PRIMITIVE_MAX_COUNT];
 
     int32_t num_spheres = 0;
 

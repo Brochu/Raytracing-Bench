@@ -13,15 +13,15 @@ cbuffer SceneCB : register(b0) {
     uint frame_index;
     float4 spheres[128];
     float4 colors[128];
-    int types[128];
+    uint4 materials[128];
 };
 
 struct [raypayload] RayPayload {
-    float4 color      : read(caller) : write(miss);
-    float3 hit_pos    : read(caller) : write(closesthit);
-    float3 hit_normal : read(caller) : write(closesthit);
-    uint hit_index    : read(caller) : write(closesthit);
-    uint did_hit      : read(caller) : write(miss, closesthit);
+    float4 color      : read(caller) : write(caller, miss);
+    float3 hit_pos    : read(caller) : write(caller, closesthit);
+    float3 hit_normal : read(caller) : write(caller, closesthit);
+    uint hit_index    : read(caller) : write(caller, closesthit);
+    uint did_hit      : read(caller) : write(caller, miss, closesthit);
 };
 
 struct ProceduralPrimitiveAttributes {
@@ -121,8 +121,16 @@ void raygen_main() {
         throughput *= albedo;
 
         // Set up next bounce
-        origin    = payload.hit_pos;
-        direction = random_cosine_hemisphere(payload.hit_normal, seed);
+        origin = payload.hit_pos;
+
+        uint mat_type = materials[payload.hit_index].x;
+        if (mat_type == 1) {
+            // Mirror: reflect ray around surface normal
+            direction = reflect(direction, payload.hit_normal);
+        } else {
+            // Diffuse: scatter in random hemisphere direction
+            direction = random_cosine_hemisphere(payload.hit_normal, seed);
+        }
     }
 
     // If all bounces exhausted without reaching the sky, final_color stays black

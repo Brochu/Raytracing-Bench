@@ -471,7 +471,9 @@ void render_draw(renderer *r, render_scene *scene) {
     cbuffer->cam_position = scene->camera.position;
     cbuffer->num_spheres = scene->num_spheres;
     cbuffer->frame_index = r->frame_index;
-    memcpy_s(&cbuffer->spheres, 3*128*sizeof(DirectX::XMFLOAT4), &scene->spheres, 3*128*sizeof(DirectX::XMFLOAT4));
+    memcpy(cbuffer->spheres, scene->spheres, sizeof(scene->spheres));
+    memcpy(cbuffer->colors, scene->colors, sizeof(scene->colors));
+    memcpy(cbuffer->materials, scene->materials, sizeof(scene->materials));
 
     DirectX::XMVECTOR eye    = DirectX::XMLoadFloat4(&scene->camera.position);
     DirectX::XMVECTOR target = DirectX::XMLoadFloat4(&scene->camera.target);

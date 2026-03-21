@@ -138,7 +138,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     for (int32_t i = 0; i < sphere_count; i++) {
         float radius = randf(min_radius, max_radius);
 
-        g_scene.types[i] = 0;
+        g_scene.materials[i] = { (rand() % 16 == 0) ? 1u : 0u, 0, 0, 0 };  // .x = type, ~33% mirrors
         g_scene.spheres[i] = {
             randf(min_coord, max_coord),
             ground_y + radius,
