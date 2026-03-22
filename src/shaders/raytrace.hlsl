@@ -113,7 +113,8 @@ void raygen_main() {
     RaytracingAccelerationStructure tlas = ResourceDescriptorHeap[2 + frame_index];
 
     uint2 pixel = DispatchRaysIndex().xy;
-    uint seed = hash(pixel.x * 1973 + pixel.y * 9277 + frame_index * 26699);
+    //uint seed = hash(pixel.x * 1973 + pixel.y * 9277 + frame_index * 26699);
+    uint seed = hash(pixel.x * 1973 + pixel.y * 9277 * 26699);
 
     float3 accumulated_color = float3(0, 0, 0);
 

@@ -107,7 +107,7 @@ struct render_scene {
     int32_t num_spheres = 0;
     uint32_t rays_per_pixel = 8;
     float ground_y = 0.0f;
-    DirectX::XMFLOAT4 ground_color = { 0.8f, 0.8f, 0.8f, 1.0f };
+    DirectX::XMFLOAT4 ground_color = { 0.8f, 0.8f, 0.4f, 1.0f };
 
     render_cam camera;
 };
