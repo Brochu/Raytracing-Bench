@@ -12,7 +12,10 @@ cbuffer SceneCB : register(b0) {
     uint num_spheres;
     uint frame_index;
     uint rays_per_pixel;
-    uint _pad[3];
+    float ground_y;
+    uint _pad0;
+    uint _pad1;
+    float4 ground_color;
     float4 spheres[128];
     float4 colors[128];
     uint4 materials[128];
@@ -51,7 +54,7 @@ float rand_float(inout uint seed, float min, float max) {
     return min + (max - min) * rand_float(seed);
 }
 
-float3 rand_unit_sphere(uint seed)
+float3 rand_unit_sphere(inout uint seed)
 {
     float phi = 2.0 * PI * rand_float(seed);
     float cosTheta = 2.0 * rand_float(seed) - 1.0;
@@ -80,6 +83,8 @@ float3 rand_unit_disk(inout uint seed) {
 float3 rand_unit_vector(inout uint seed) {
     return normalize(rand_unit_sphere(seed));
 }
+
+
 
 float3 random_cosine_hemisphere(inout uint seed, float3 normal) {
     float u1 = rand_float(seed);
@@ -152,26 +157,45 @@ void raygen_main() {
 
             TraceRay(tlas, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
 
-            if (!payload.did_hit) {
+            // Analytical ground plane intersection (infinite XZ plane at y = ground_y)
+            bool hit_ground = false;
+            float ground_t = -1.0f;
+            if (abs(direction.y) > 1e-6f) {
+                ground_t = (ground_y - origin.y) / direction.y;
+                if (ground_t > ray.TMin) {
+                    // Ground is in front of the ray — check if it's closer than geometry
+                    float geo_t = payload.did_hit ? length(payload.hit_pos - origin) : ray.TMax;
+                    if (ground_t < geo_t) {
+                        hit_ground = true;
+                    }
+                }
+            }
+
+            if (hit_ground) {
+                // Ground hit — diffuse bounce off the ground plane
+                throughput *= ground_color.rgb;
+                origin = origin + ground_t * direction;
+                direction = random_cosine_hemisphere(seed, float3(0, 1, 0));
+            } else if (!payload.did_hit) {
                 // Ray escaped to sky — accumulate sky light modulated by throughput
                 sample_color = throughput * payload.color.rgb;
                 break;
-            }
-
-            // Surface hit — modulate throughput by surface albedo
-            float3 albedo = colors[payload.hit_index].rgb;
-            throughput *= albedo;
-
-            // Set up next bounce
-            origin = payload.hit_pos;
-
-            uint mat_type = materials[payload.hit_index].x;
-            if (mat_type == 1) {
-                // Mirror: reflect ray around surface normal
-                direction = reflect(direction, payload.hit_normal);
             } else {
-                // Diffuse: scatter in random hemisphere direction
-                direction = random_cosine_hemisphere(seed, payload.hit_normal);
+                // Geometry hit — modulate throughput by surface albedo
+                float3 albedo = colors[payload.hit_index].rgb;
+                throughput *= albedo;
+
+                // Set up next bounce
+                origin = payload.hit_pos;
+
+                uint mat_type = materials[payload.hit_index].x;
+                if (mat_type == 1) {
+                    // Mirror: reflect ray around surface normal
+                    direction = reflect(direction, payload.hit_normal);
+                } else {
+                    // Diffuse: scatter in random hemisphere direction
+                    direction = random_cosine_hemisphere(seed, payload.hit_normal);
+                }
             }
         }
 
