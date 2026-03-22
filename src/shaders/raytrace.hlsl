@@ -11,6 +11,8 @@ cbuffer SceneCB : register(b0) {
 
     uint num_spheres;
     uint frame_index;
+    uint rays_per_pixel;
+    uint _pad[3];
     float4 spheres[128];
     float4 colors[128];
     uint4 materials[128];
@@ -108,66 +110,76 @@ void raygen_main() {
     uint2 pixel = DispatchRaysIndex().xy;
     uint seed = hash(pixel.x * 1973 + pixel.y * 9277 + frame_index * 26699);
 
-    // Compute NDC coordinates [-1, 1]
-    float2 ndc = float2(
-        (pixel.x + 0.5f) / (float)width  *  2.0f - 1.0f,
-        (pixel.y + 0.5f) / (float)height * -2.0f + 1.0f
-    );
+    float3 accumulated_color = float3(0, 0, 0);
 
-    // Unproject near and far points through inverse view-projection
-    float4 world_near = mul(float4(ndc, 0.0f, 1.0f), inv_view_proj);
-    float4 world_far  = mul(float4(ndc, 1.0f, 1.0f), inv_view_proj);
-    world_near /= world_near.w;
-    world_far  /= world_far.w;
+    for (uint sample_i = 0; sample_i < rays_per_pixel; sample_i++) {
+        // Jitter the sub-pixel offset for anti-aliasing
+        float jitter_x = rand_float(seed);
+        float jitter_y = rand_float(seed);
 
-    float3 origin    = world_near.xyz;
-    float3 direction = normalize(world_far.xyz - world_near.xyz);
+        // Compute NDC coordinates [-1, 1] with jitter
+        float2 ndc = float2(
+            (pixel.x + jitter_x) / (float)width  *  2.0f - 1.0f,
+            (pixel.y + jitter_y) / (float)height * -2.0f + 1.0f
+        );
 
-    // Path tracing loop — throughput tracks how much light each bounce lets through
-    float3 throughput = float3(1, 1, 1);
-    float3 final_color = float3(0, 0, 0);
+        // Unproject near and far points through inverse view-projection
+        float4 world_near = mul(float4(ndc, 0.0f, 1.0f), inv_view_proj);
+        float4 world_far  = mul(float4(ndc, 1.0f, 1.0f), inv_view_proj);
+        world_near /= world_near.w;
+        world_far  /= world_far.w;
 
-    for (uint bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
-        RayDesc ray;
-        ray.Origin    = origin;
-        ray.Direction = direction;
-        ray.TMin      = 0.001f;
-        ray.TMax      = 10000.0f;
+        float3 origin    = world_near.xyz;
+        float3 direction = normalize(world_far.xyz - world_near.xyz);
 
-        RayPayload payload;
-        payload.color      = float4(0, 0, 0, 1);
-        payload.hit_pos    = float3(0, 0, 0);
-        payload.hit_normal = float3(0, 0, 0);
-        payload.hit_index  = 0;
-        payload.did_hit    = 0;
+        // Path tracing loop — throughput tracks how much light each bounce lets through
+        float3 throughput = float3(1, 1, 1);
+        float3 sample_color = float3(0, 0, 0);
 
-        TraceRay(tlas, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
+        for (uint bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
+            RayDesc ray;
+            ray.Origin    = origin;
+            ray.Direction = direction;
+            ray.TMin      = 0.001f;
+            ray.TMax      = 10000.0f;
 
-        if (!payload.did_hit) {
-            // Ray escaped to sky — accumulate sky light modulated by throughput
-            final_color = throughput * payload.color.rgb;
-            break;
+            RayPayload payload;
+            payload.color      = float4(0, 0, 0, 1);
+            payload.hit_pos    = float3(0, 0, 0);
+            payload.hit_normal = float3(0, 0, 0);
+            payload.hit_index  = 0;
+            payload.did_hit    = 0;
+
+            TraceRay(tlas, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
+
+            if (!payload.did_hit) {
+                // Ray escaped to sky — accumulate sky light modulated by throughput
+                sample_color = throughput * payload.color.rgb;
+                break;
+            }
+
+            // Surface hit — modulate throughput by surface albedo
+            float3 albedo = colors[payload.hit_index].rgb;
+            throughput *= albedo;
+
+            // Set up next bounce
+            origin = payload.hit_pos;
+
+            uint mat_type = materials[payload.hit_index].x;
+            if (mat_type == 1) {
+                // Mirror: reflect ray around surface normal
+                direction = reflect(direction, payload.hit_normal);
+            } else {
+                // Diffuse: scatter in random hemisphere direction
+                direction = random_cosine_hemisphere(seed, payload.hit_normal);
+            }
         }
 
-        // Surface hit — modulate throughput by surface albedo
-        float3 albedo = colors[payload.hit_index].rgb;
-        throughput *= albedo;
-
-        // Set up next bounce
-        origin = payload.hit_pos;
-
-        uint mat_type = materials[payload.hit_index].x;
-        if (mat_type == 1) {
-            // Mirror: reflect ray around surface normal
-            direction = reflect(direction, payload.hit_normal);
-        } else {
-            // Diffuse: scatter in random hemisphere direction
-            direction = random_cosine_hemisphere(seed, payload.hit_normal);
-        }
+        accumulated_color += sample_color;
     }
 
-    // If all bounces exhausted without reaching the sky, final_color stays black
-    output[pixel] = float4(final_color, 1.0f);
+    // Average all samples
+    output[pixel] = float4(accumulated_color / (float)rays_per_pixel, 1.0f);
 }
 
 [shader("miss")]

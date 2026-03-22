@@ -471,6 +471,7 @@ void render_draw(renderer *r, render_scene *scene) {
     cbuffer->cam_position = scene->camera.position;
     cbuffer->num_spheres = scene->num_spheres;
     cbuffer->frame_index = r->frame_index;
+    cbuffer->rays_per_pixel = scene->rays_per_pixel;
     memcpy(cbuffer->spheres, scene->spheres, sizeof(scene->spheres));
     memcpy(cbuffer->colors, scene->colors, sizeof(scene->colors));
     memcpy(cbuffer->materials, scene->materials, sizeof(scene->materials));

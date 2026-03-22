@@ -3,7 +3,8 @@
     "allow": [
       "Bash(./build.bat:*)",
       "Bash(tree:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(find C:UsersalexbDocumentsRaytracing-Bench -type f -name *.glsl -o -name *.wgsl -o -name *.hlsl -o -name *.frag -o -name *.vert -o -name *.comp)"
     ]
   }
 }

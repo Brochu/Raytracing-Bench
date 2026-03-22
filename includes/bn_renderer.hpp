@@ -78,6 +78,8 @@ struct render_cbuffer {
 
     uint32_t num_spheres;
     uint32_t frame_index;
+    uint32_t rays_per_pixel;
+    uint32_t _pad[3];
     DirectX::XMFLOAT4 spheres[PRIMITIVE_MAX_COUNT];
     DirectX::XMFLOAT4 colors[PRIMITIVE_MAX_COUNT];
     DirectX::XMUINT4 materials[PRIMITIVE_MAX_COUNT];
@@ -101,6 +103,7 @@ struct render_scene {
     DirectX::XMUINT4 materials[PRIMITIVE_MAX_COUNT];
 
     int32_t num_spheres = 0;
+    uint32_t rays_per_pixel = 8;
 
     render_cam camera;
 };
