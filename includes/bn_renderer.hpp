@@ -9,9 +9,9 @@
 
 #include "dxcapi.h"
 
-constexpr uint32_t PRIMITIVE_MAX_COUNT = 128;
-constexpr uint32_t FRAME_COUNT = 2;
-constexpr uint32_t PASS_MAX_COUNT = 16;
+constexpr int32_t PRIMITIVE_MAX_COUNT = 128;
+constexpr int32_t FRAME_COUNT = 2;
+constexpr int32_t PASS_MAX_COUNT = 16;
 
 struct renderer;
 
@@ -58,14 +58,14 @@ struct renderer {
 
     IDxcBlob *rt_shaders_blob;
 
-    uint32_t frame_index;
-    uint32_t width;
-    uint32_t height;
+    int32_t frame_index;
+    int32_t width;
+    int32_t height;
 
     frame_resources frame_res[FRAME_COUNT];
     render_pass passes[PASS_MAX_COUNT];
-    uint32_t num_passes = 0;
-    uint32_t current_pass_id = 0;
+    int32_t num_passes = 0;
+    int32_t current_pass_id = 0;
 };
 
 struct render_cbuffer {
@@ -73,18 +73,20 @@ struct render_cbuffer {
     DirectX::XMFLOAT4X4 inv_view_proj;
     DirectX::XMFLOAT4 cam_position;
 
-    uint32_t width;
-    uint32_t height;
-
-    uint32_t num_spheres;
-    uint32_t frame_index;
-    uint32_t rays_per_pixel;
-    float ground_y;
-    uint32_t _pad[2];
-    DirectX::XMFLOAT4 ground_color;
     DirectX::XMFLOAT4 spheres[PRIMITIVE_MAX_COUNT];
     DirectX::XMFLOAT4 colors[PRIMITIVE_MAX_COUNT];
     DirectX::XMUINT4 materials[PRIMITIVE_MAX_COUNT];
+
+    DirectX::XMFLOAT4 ground_color;
+    float ground_y;
+
+    int32_t frame_index;
+    int32_t num_spheres;
+    int32_t rays_per_pixel;
+
+    int32_t width;
+    int32_t height;
+    uint32_t _pad[2];
 };
 
 struct render_cam {
@@ -104,14 +106,15 @@ struct render_scene {
     DirectX::XMFLOAT4 colors[PRIMITIVE_MAX_COUNT];
     DirectX::XMUINT4 materials[PRIMITIVE_MAX_COUNT];
 
-    int32_t num_spheres = 0;
-    uint32_t rays_per_pixel = 8;
-    float ground_y = 0.0f;
     DirectX::XMFLOAT4 ground_color = { 0.8f, 0.8f, 0.4f, 1.0f };
+    float ground_y = 0.0f;
+
+    int32_t num_spheres = 0;
+    int32_t rays_per_pixel = 8;
 
     render_cam camera;
 };
 
-void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::initializer_list<render_pass*>);
+void render_init(renderer *r, HWND hwnd, int32_t width, int32_t height, std::initializer_list<render_pass*>);
 void render_draw(renderer *r, render_scene *scene);
 void render_stop(renderer *r);

@@ -31,7 +31,7 @@ IDxcBlob *shaders_compile_file(const wchar_t *path, const wchar_t *entry, const 
         L"-Zi",
         L"-E", entry,
     };
-    const UINT32 arg_count = (entry) ? _countof(args) : _countof(args) - 2;
+    const INT32 arg_count = (entry) ? _countof(args) : _countof(args) - 2;
 
     DxcBuffer src_buf = {};
     src_buf.Ptr = source->GetBufferPointer();

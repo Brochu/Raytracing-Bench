@@ -87,8 +87,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     freopen_s(&fp, "CONOUT$", "w", stderr);
     freopen_s(&fp, "CONIN$", "r", stdin);;
 
-    constexpr uint32_t win_width = 800;
-    constexpr uint32_t win_height = 600;
+    constexpr int32_t win_width = 800;
+    constexpr int32_t win_height = 600;
 
     HICON icon = LoadIcon(hInstance, "g_icon");
 

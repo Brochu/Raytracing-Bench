@@ -6,19 +6,20 @@ cbuffer SceneCB : register(b0) {
     float4x4 inv_view_proj;
     float4 cam_position;
 
-    uint width;
-    uint height;
-
-    uint num_spheres;
-    uint frame_index;
-    uint rays_per_pixel;
-    float ground_y;
-    uint _pad0;
-    uint _pad1;
-    float4 ground_color;
     float4 spheres[128];
     float4 colors[128];
     uint4 materials[128];
+    float4 ground_color;
+    float ground_y;
+
+    uint frame_index;
+    uint num_spheres;
+    uint rays_per_pixel;
+
+    uint width;
+    uint height;
+    uint _pad0;
+    uint _pad1;
 };
 
 struct [raypayload] RayPayload {

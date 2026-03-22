@@ -37,7 +37,7 @@ static void move_to_next_frame(renderer *r) {
     r->frame_res[r->frame_index].fence_value = current_fence_value + 1;
 }
 
-void render_init(renderer *r, HWND hwnd, uint32_t width, uint32_t height, std::initializer_list<render_pass*> pass_list) {
+void render_init(renderer *r, HWND hwnd, int32_t width, int32_t height, std::initializer_list<render_pass*> pass_list) {
     *r = {};
     r->width = width;
     r->height = height;
@@ -466,18 +466,6 @@ void render_draw(renderer *r, render_scene *scene) {
     // Upload frame CBV data
     render_cbuffer *cbuffer = nullptr;
     frame->scene_cb->Map(0, nullptr, (void**)&cbuffer);
-    cbuffer->width = r->width;
-    cbuffer->height = r->height;
-    cbuffer->cam_position = scene->camera.position;
-    cbuffer->num_spheres = scene->num_spheres;
-    cbuffer->frame_index = r->frame_index;
-    cbuffer->rays_per_pixel = scene->rays_per_pixel;
-    cbuffer->ground_y = scene->ground_y;
-    cbuffer->ground_color = scene->ground_color;
-    memcpy(cbuffer->spheres, scene->spheres, sizeof(scene->spheres));
-    memcpy(cbuffer->colors, scene->colors, sizeof(scene->colors));
-    memcpy(cbuffer->materials, scene->materials, sizeof(scene->materials));
-
     DirectX::XMVECTOR eye    = DirectX::XMLoadFloat4(&scene->camera.position);
     DirectX::XMVECTOR target = DirectX::XMLoadFloat4(&scene->camera.target);
     DirectX::XMVECTOR up     = DirectX::XMVectorSet(0.f, 1.f, 0.f, 0.f);
@@ -490,10 +478,23 @@ void render_draw(renderer *r, render_scene *scene) {
     );
 
     DirectX::XMMATRIX vp     = view * proj;
-    DirectX::XMMATRIX inv_vp = DirectX::XMMatrixInverse(nullptr, vp);
-
     DirectX::XMStoreFloat4x4(&cbuffer->view_proj, DirectX::XMMatrixTranspose(vp));
+    DirectX::XMMATRIX inv_vp = DirectX::XMMatrixInverse(nullptr, vp);
     DirectX::XMStoreFloat4x4(&cbuffer->inv_view_proj, DirectX::XMMatrixTranspose(inv_vp));
+    cbuffer->cam_position = scene->camera.position;
+
+    memcpy(cbuffer->spheres, scene->spheres, sizeof(scene->spheres));
+    memcpy(cbuffer->colors, scene->colors, sizeof(scene->colors));
+    memcpy(cbuffer->materials, scene->materials, sizeof(scene->materials));
+    cbuffer->ground_color = scene->ground_color;
+    cbuffer->ground_y = scene->ground_y;
+
+    cbuffer->frame_index = r->frame_index;
+    cbuffer->num_spheres = scene->num_spheres;
+    cbuffer->rays_per_pixel = scene->rays_per_pixel;
+
+    cbuffer->width = r->width;
+    cbuffer->height = r->height;
     frame->scene_cb->Unmap(0, nullptr);
     cbuffer = nullptr;
 
