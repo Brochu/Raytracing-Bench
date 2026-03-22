@@ -1,5 +1,5 @@
-// Maximum number of secondary bounces (total TraceRay calls = 1 primary + MAX_BOUNCES)
 static const uint MAX_BOUNCES = 4;
+static const float PI = 3.1415926535;
 
 cbuffer SceneCB : register(b0) {
     float4x4 view_proj;
@@ -45,12 +45,46 @@ float rand_float(inout uint seed) {
     return float(seed) / 4294967295.0f;
 }
 
-float3 random_cosine_hemisphere(float3 normal, inout uint seed) {
+float rand_float(inout uint seed, float min, float max) {
+    return min + (max - min) * rand_float(seed);
+}
+
+float3 rand_unit_sphere(uint seed)
+{
+    float phi = 2.0 * PI * rand_float(seed);
+    float cosTheta = 2.0 * rand_float(seed) - 1.0;
+    float u = rand_float(seed);
+
+    float theta = acos(cosTheta);
+    float r = pow(u, 1.0 / 3.0);
+
+    float x = r * sin(theta) * cos(phi);
+    float y = r * sin(theta) * sin(phi);
+    float z = r * cos(theta);
+
+    return float3(x, y, z);
+}
+
+float3 rand_unit_disk(inout uint seed) {
+    float sin_t = 2.0 * rand_float(seed) - 1.0;
+    float cos_t = 2.0 * rand_float(seed) - 1.0;
+
+    float x = cos(cos_t);
+    float y = cos(sin_t);
+
+    return float3(x, y, 0);
+}
+
+float3 rand_unit_vector(inout uint seed) {
+    return normalize(rand_unit_sphere(seed));
+}
+
+float3 random_cosine_hemisphere(inout uint seed, float3 normal) {
     float u1 = rand_float(seed);
     float u2 = rand_float(seed);
 
     float r = sqrt(u1);
-    float theta = 2.0f * 3.14159265f * u2;
+    float theta = 2.0f * PI * u2;
 
     float x = r * cos(theta);
     float y = r * sin(theta);
@@ -72,6 +106,7 @@ void raygen_main() {
     RaytracingAccelerationStructure tlas = ResourceDescriptorHeap[2 + frame_index];
 
     uint2 pixel = DispatchRaysIndex().xy;
+    uint seed = hash(pixel.x * 1973 + pixel.y * 9277 + frame_index * 26699);
 
     // Compute NDC coordinates [-1, 1]
     float2 ndc = float2(
@@ -87,8 +122,6 @@ void raygen_main() {
 
     float3 origin    = world_near.xyz;
     float3 direction = normalize(world_far.xyz - world_near.xyz);
-
-    uint seed = hash(pixel.x * 1973 + pixel.y * 9277 + frame_index * 26699);
 
     // Path tracing loop — throughput tracks how much light each bounce lets through
     float3 throughput = float3(1, 1, 1);
@@ -129,7 +162,7 @@ void raygen_main() {
             direction = reflect(direction, payload.hit_normal);
         } else {
             // Diffuse: scatter in random hemisphere direction
-            direction = random_cosine_hemisphere(payload.hit_normal, seed);
+            direction = random_cosine_hemisphere(seed, payload.hit_normal);
         }
     }
 
