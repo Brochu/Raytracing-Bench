@@ -19,8 +19,12 @@ static void update_orbit_camera() {
     float x = cam->orbit_dist * cosf(cam->orbit_pitch) * sinf(cam->orbit_yaw);
     float y = cam->orbit_dist * sinf(cam->orbit_pitch);
     float z = cam->orbit_dist * cosf(cam->orbit_pitch) * cosf(cam->orbit_yaw);
-    cam->position = { x, y, z, 1.f };
-    cam->target   = { 0.f, 0.f, 0.f, 1.f };
+    cam->position = {
+        cam->target.x + x,
+        cam->target.y + y,
+        cam->target.z + z,
+        1.f
+    };
 }
 
 LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -68,6 +72,47 @@ LRESULT CALLBACK window_proc(HWND hWindow, UINT msg, WPARAM wparam, LPARAM lpara
         }
         return 0;
 
+    case WM_KEYDOWN:
+        {
+            float speed = 1.0f;
+            float yaw = g_scene.camera.orbit_yaw;
+
+            // Forward/back along the camera's yaw direction on the ground plane
+            float fwd_x = sinf(yaw);
+            float fwd_z = cosf(yaw);
+            // Right is perpendicular
+            float rgt_x =  cosf(yaw);
+            float rgt_z = -sinf(yaw);
+
+            float dx = 0.f, dz = 0.f;
+            switch (wparam) {
+                case 'W': dx -= fwd_x * speed; dz -= fwd_z * speed; break;
+                case 'S': dx += fwd_x * speed; dz += fwd_z * speed; break;
+                case 'A': dx += rgt_x * speed; dz += rgt_z * speed; break;
+                case 'D': dx -= rgt_x * speed; dz -= rgt_z * speed; break;
+                default: break;
+            }
+
+            if (dx != 0.f || dz != 0.f) {
+                g_scene.camera.target.x += dx;
+                g_scene.camera.target.z += dz;
+                update_orbit_camera();
+            }
+        }
+        return 0;
+
+    case WM_MOUSEWHEEL:
+        {
+            float delta = (float)GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA;
+            g_scene.camera.orbit_dist -= delta * 2.0f;
+
+            if (g_scene.camera.orbit_dist < 3.f)  g_scene.camera.orbit_dist = 3.f;
+            if (g_scene.camera.orbit_dist > 100.f) g_scene.camera.orbit_dist = 100.f;
+
+            update_orbit_camera();
+        }
+        return 0;
+
     case WM_PAINT:
         {
             renderer *r = reinterpret_cast<renderer*>(GetWindowLongPtr(hWindow, GWLP_USERDATA));
@@ -87,8 +132,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     freopen_s(&fp, "CONOUT$", "w", stderr);
     freopen_s(&fp, "CONIN$", "r", stdin);;
 
-    constexpr int32_t win_width = 800;
-    constexpr int32_t win_height = 600;
+    constexpr int32_t win_width = 1280;
+    constexpr int32_t win_height = 960;
 
     HICON icon = LoadIcon(hInstance, "g_icon");
 
@@ -149,6 +194,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmdline, 
     }
     g_scene.num_spheres = sphere_count;
 
+    g_scene.camera.target = { 0.f, 0.f, 0.f, 1.f };
     update_orbit_camera();
     //-------------------------
 
