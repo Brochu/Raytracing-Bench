@@ -1,3 +1,6 @@
+//hlsl-ls target cs_6_6
+//hlsl-ls entry CSMain
+
 static const uint MAX_BOUNCES = 4;
 static const float PI = 3.1415926535;
 
